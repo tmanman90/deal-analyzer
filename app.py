@@ -2,6 +2,8 @@ import streamlit as st
 import pandas as pd
 import numpy as np
 import math
+import base64
+import json
 
 # -----------------------------------------------------------------------------
 # CONFIG & STYLES
@@ -13,7 +15,61 @@ st.set_page_config(
     initial_sidebar_state="expanded"
 )
 
-# Custom CSS for a professional, financial dashboard look
+# -----------------------------------------------------------------------------
+# URL STATE MANAGEMENT (SHARE LINK LOGIC)
+# -----------------------------------------------------------------------------
+# This must run before widgets are instantiated to set their default values
+if "defaults" not in st.session_state:
+    st.session_state.defaults = {}
+
+# Check query params for shared data
+if "initialized" not in st.session_state:
+    try:
+        # Check if 'data' is in the query parameters
+        # Compatible with both st.query_params (new) and potentially older handling
+        params = st.query_params
+        if "data" in params:
+            encoded_data = params["data"]
+            
+            # Handle list return type (older Streamlit versions sometimes return lists)
+            if isinstance(encoded_data, list):
+                encoded_data = encoded_data[0]
+            
+            # 1. Restore Padding if missing (Common copy-paste error)
+            missing_padding = len(encoded_data) % 4
+            if missing_padding:
+                encoded_data += '=' * (4 - missing_padding)
+            
+            # 2. Decode (Try URL-safe first, then standard)
+            try:
+                # Try URL-safe decode (replaces -_ with +/)
+                json_str = base64.urlsafe_b64decode(encoded_data).decode('utf-8')
+            except Exception:
+                # Fallback to standard decode
+                json_str = base64.b64decode(encoded_data).decode('utf-8')
+
+            loaded_data = json.loads(json_str)
+            
+            # Store in session state for widgets to use as defaults
+            st.session_state.defaults = loaded_data
+            st.toast("Configuration loaded from shared link!", icon="✅")
+            
+            # If advanced mode was shared and analysis was run, trigger the analysis state
+            if loaded_data.get("input_mode") == "Advanced (Auto-Detect)":
+                st.session_state.analysis_complete = True
+    except Exception as e:
+        # Silent fail or small warning to avoid crashing app on bad link
+        print(f"Share link load error: {e}")
+    
+    st.session_state.initialized = True
+
+def get_default(key, fallback):
+    """Helper to get value from shared state or return fallback"""
+    return st.session_state.defaults.get(key, fallback)
+
+# -----------------------------------------------------------------------------
+# CUSTOM CSS
+# -----------------------------------------------------------------------------
 st.markdown("""
 <style>
     .main {
@@ -213,7 +269,12 @@ with st.sidebar:
     st.header("Deal Inputs")
     
     # NEW: Mode Selection
-    input_mode = st.radio("Analysis Mode", ["Simple (Manual)", "Advanced (Auto-Detect)"])
+    # Get default index for radio button
+    mode_options = ["Simple (Manual)", "Advanced (Auto-Detect)"]
+    default_mode = get_default("input_mode", "Simple (Manual)")
+    mode_index = mode_options.index(default_mode) if default_mode in mode_options else 0
+    
+    input_mode = st.radio("Analysis Mode", mode_options, index=mode_index)
     
     st.markdown("---")
     
@@ -227,12 +288,21 @@ with st.sidebar:
     
     if input_mode == "Simple (Manual)":
         st.subheader("Streaming Volume")
-        us_streams = st.number_input("US Weekly Streams", min_value=0, value=500000, step=10000)
-        global_streams = st.number_input("Global Weekly Streams", min_value=0, value=1000000, step=10000)
+        us_streams = st.number_input("US Weekly Streams", min_value=0, value=get_default("us_streams_manual", 500000), step=10000)
+        global_streams = st.number_input("Global Weekly Streams", min_value=0, value=get_default("global_streams_manual", 1000000), step=10000)
         
         st.subheader("Trend Projections")
-        us_trend_sel = st.selectbox("US Trend", list(TREND_MAP.keys()), index=0)
-        ex_us_trend_sel = st.selectbox("Int'l Trend", list(TREND_MAP.keys()), index=0)
+        # Get indexes for selectboxes
+        trend_keys = list(TREND_MAP.keys())
+        
+        def_us_trend = get_default("us_trend_manual", "Stable (0%)")
+        us_trend_idx = trend_keys.index(def_us_trend) if def_us_trend in trend_keys else 0
+        
+        def_ex_trend = get_default("ex_us_trend_manual", "Stable (0%)")
+        ex_trend_idx = trend_keys.index(def_ex_trend) if def_ex_trend in trend_keys else 0
+        
+        us_trend_sel = st.selectbox("US Trend", trend_keys, index=us_trend_idx)
+        ex_us_trend_sel = st.selectbox("Int'l Trend", trend_keys, index=ex_trend_idx)
         
         run_analysis = True # Always run in manual mode
 
@@ -240,8 +310,8 @@ with st.sidebar:
         st.subheader("Historical Data (8 Weeks)")
         st.caption("Paste numbers (separated by Space or Newline). Commas are ignored.")
         
-        us_input_raw = st.text_area("US Streams History", "71000 72000 71500 73000 74000 74500 75000 76000")
-        global_input_raw = st.text_area("Global Streams History", "150000 152000 151000 153000 155000 156000 158000 160000")
+        us_input_raw = st.text_area("US Streams History", get_default("us_history_txt", "71000 72000 71500 73000 74000 74500 75000 76000"))
+        global_input_raw = st.text_area("Global Streams History", get_default("global_history_txt", "150000 152000 151000 153000 155000 156000 158000 160000"))
         
         # --- STATE MANAGEMENT FIX ---
         if "analysis_complete" not in st.session_state:
@@ -278,11 +348,52 @@ with st.sidebar:
             run_analysis = False
 
     st.subheader("Deal Structure")
-    artist_share_pct = st.slider("Artist Share %", 10, 100, 60, 5)
+    artist_share_pct = st.slider("Artist Share %", 10, 100, get_default("artist_share", 60), 5)
     artist_share = artist_share_pct / 100.0
 
     st.markdown("---")
-    st.caption("Deal Analyzer v2.1.3 | Session State Fixed")
+    
+    # -------------------------------------------------------------------------
+    # SHARE FUNCTIONALITY
+    # -------------------------------------------------------------------------
+    st.subheader("🔗 Share Analysis")
+    if st.button("Generate Share Link"):
+        # Gather all current inputs
+        share_payload = {
+            "input_mode": input_mode,
+            "artist_share": artist_share_pct,
+            # Manual Mode Data
+            "us_streams_manual": us_streams if input_mode == "Simple (Manual)" else 500000,
+            "global_streams_manual": global_streams if input_mode == "Simple (Manual)" else 1000000,
+            "us_trend_manual": us_trend_sel if input_mode == "Simple (Manual)" else "Stable (0%)",
+            "ex_us_trend_manual": ex_us_trend_sel if input_mode == "Simple (Manual)" else "Stable (0%)",
+            # Advanced Mode Data
+            "us_history_txt": us_input_raw if input_mode != "Simple (Manual)" else "",
+            "global_history_txt": global_input_raw if input_mode != "Simple (Manual)" else "",
+            # Section 3: Deal Reality Check
+            "selected_reality_check": st.session_state.get("reality_check_picker", get_default("selected_reality_check", "Target Ceiling (Ceiling Gross)"))
+        }
+        
+        # Encode (Using URL-Safe Base64)
+        json_str = json.dumps(share_payload)
+        b64_str = base64.urlsafe_b64encode(json_str.encode('utf-8')).decode('utf-8')
+        
+        # 1. Update the URL in browser (if supported by environment)
+        try:
+            st.query_params["data"] = b64_str
+        except:
+            pass
+            
+        # 2. Show the link manually
+        share_url = f"?data={b64_str}"
+        
+        st.success("Link generated!")
+        st.markdown(f"### [🔗 Open Shareable Link]({share_url})")
+        st.info("Right-click the link above and select 'Copy Link Address' to share it with others.")
+        st.caption("Raw Code (if needed):")
+        st.code(share_url, language="text")
+
+    st.caption("Deal Analyzer v2.3 | URL Safe Sharing")
 
 # -----------------------------------------------------------------------------
 # MAIN APP LOGIC
@@ -302,7 +413,7 @@ if ex_us_streams < 0:
 # SECTION 0: AUTO-DETECT VISUALIZATION (Only in Advanced Mode)
 # -----------------------------------------------------------------------------
 if input_mode == "Advanced (Auto-Detect)":
-    st.markdown("### 📊 Historical Analysis")
+    st.markdown("### 📈 Historical Analysis")
     
     # Show Charts
     chart_data = pd.DataFrame({
@@ -387,13 +498,22 @@ recoup_options = {
     "Aggressive (110% of Ceiling)": aggressive_offer
 }
 
+# Determine index for the selectbox based on loaded defaults
+default_option = get_default("selected_reality_check", "Target Ceiling (Ceiling Gross)")
+options_list = list(recoup_options.keys())
+try:
+    default_index = options_list.index(default_option)
+except ValueError:
+    default_index = 2 # Default to Target Ceiling if match not found
+
 # Create columns for the dropdown
 rc1, rc2 = st.columns([2, 1])
 with rc1:
     selected_option = st.selectbox(
         "Select Proposed Advance for Analysis:", 
-        options=list(recoup_options.keys()), 
-        index=2  # Default to Target Ceiling
+        options=options_list, 
+        index=default_index,  # Use calculated index
+        key="reality_check_picker" # Key allows access in sidebar logic
     )
 selected_advance = recoup_options[selected_option]
 
