@@ -307,16 +307,65 @@ def generate_ai_strategy(api_key, context_data):
         # Attempt to use the v1.0+ client syntax
         client = openai.OpenAI(api_key=api_key)
         
-        system_prompt = "You are a senior, ruthless, but fair Record Label Executive (A&R). You are advising a junior A&R on how to close a deal. Be concise, strategic, and specific."
+        system_prompt = """
+
+You are an internal deal strategist for a record label, advising the COO (expert buyer).
+
+Be ruthless, data-driven, and concise.
+
+
+
+Rules:
+
+- DO NOT write dialogue or a script to the artist. No quotes.
+
+- Output MUST be under 120 words.
+
+- Use bullets and numbers. No fluff. No generic “relationship” advice.
+
+- If trends are Cooling/Decay/Falling Knife/New Artist, emphasize downside protection.
+
+"""
         
         user_prompt = f"""
-        The artist's US Trend is {context_data['us_trend']}.
-        The International Trend is {context_data['ex_us_trend']}.
-        We calculated a Risk Floor of ${context_data['floor']:,.0f} and a Ceiling of ${context_data['ceiling']:,.0f}.
-        The artist takes {context_data['recoup_months']:.1f} months to recoup at the Ceiling price.
-        
-        Task: Write a 3-step negotiation script (Anchor, Rationalize, Close) specifically tailored to these trends (e.g., mention the 'Falling Knife' or 'New Artist' risks if present).
-        """
+
+DEAL INPUTS
+
+- US trend: {context_data['us_trend']}
+
+- Intl trend: {context_data['ex_us_trend']}
+
+- Floor (52wk gross): ${context_data['floor']:,.0f}
+
+- Ceiling (52wk gross): ${context_data['ceiling']:,.0f}
+
+- Proposed advance: ${context_data['advance']:,.0f}
+
+- Label breakeven (months): {context_data['label_breakeven_months']:.1f}
+
+- Artist recoup (months): {context_data['artist_recoup_months']:.1f}
+
+
+
+TASK
+
+Write an internal COO brief with exactly these sections:
+
+
+
+1) READ (1 line): what the data says (momentum + valuation shape).
+
+2) POSTURE (3 bullets): Anchor / Walkaway / Stretch (each with $ + 1 rationale).
+
+3) BACK-POCKET FACTS (3 bullets): numbers/phrases to use in negotiation (data only).
+
+4) CONCESSION LADDER (2 bullets): what you give + what you demand in return (measurable).
+
+
+
+Keep it tight. No dialogue. No filler.
+
+"""
         
         response = client.chat.completions.create(
             model="gpt-5.2", # Using latest available model as proxy for 5.2
@@ -627,10 +676,10 @@ st.markdown("#### 4. Buyer's Strategy Script")
 strategy_html = f"""
 <div class="strategy-box">
     <strong>NEGOTIATION SCRIPT:</strong><br><br>
-    "Based on the analysis of the last 8 weeks, we see a <strong>{us_trend_sel}</strong> trend."<br><br>
+    \"Based on the analysis of the last 8 weeks, we see a <strong>{us_trend_sel}</strong> trend.\"<br><br>
     1. <strong>Anchor:</strong> Start at <strong>${conservative_offer:,.0f}</strong>.<br>
     2. <strong>Rationalize:</strong> Our risk-adjusted floor is <strong>${floor_gross:,.0f}</strong> given market volatility.<br>
-    3. <strong>Close:</strong> If we stretch to <strong>${ceil_gross:,.0f}</strong>, the artist won't see royalties for <strong>{art_recoup_mo:.1f} months</strong>."
+    3. <strong>Close:</strong> If we stretch to <strong>${ceil_gross:,.0f}</strong>, the artist won't see royalties for <strong>{art_recoup_mo:.1f} months</strong>.\"
 </div>
 """
 
@@ -642,7 +691,9 @@ if openai_api_key:
                 "ex_us_trend": ex_us_trend_sel,
                 "floor": floor_gross,
                 "ceiling": ceil_gross,
-                "recoup_months": art_recoup_mo
+                "advance": selected_advance,
+                "label_breakeven_months": lbl_recoup_mo,
+                "artist_recoup_months": art_recoup_mo,
             }
             ai_output = generate_ai_strategy(openai_api_key, context_data)
             
