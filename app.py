@@ -373,7 +373,7 @@ Your goal is to write a PRIVATE INTERNAL BRIEFING for the COO.
 """
         
         response = client.chat.completions.create(
-            model="gpt-4o", 
+             model="gpt-5.2", 
             temperature=0.7,
             messages=[
                 {"role": "system", "content": system_prompt},
