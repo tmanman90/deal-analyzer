@@ -351,7 +351,6 @@ Your goal is to write a PRIVATE INTERNAL BRIEFING for the COO.
    - <b>Strategy</b>: (One phrase tactical instruction).
 6. <b>COO Verdict</b>:
    - "Breakeven in {breakeven} mo." (<b>Grade: Safe/Stretch/Risky</b>).
-
 7. <b>Extra</b>:
    - Give a 3 sentance analysis after analyzing all available data.
    
