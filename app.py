@@ -315,6 +315,12 @@ def generate_ai_strategy(api_key, context_data):
 You are a ruthless and experienced Deal Strategist for a Record Label's COO. 
 Your goal is to write a PRIVATE INTERNAL BRIEFING for the COO.
 
+**NARRATIVE RULES (Tell the Story):**
+- **Don't just list numbers.** Give context.
+- **Use Time:** "Peak was just {us_weeks_ago} weeks ago."
+- **Use Velocity:** "Dropped {us_wow}% week-over-week."
+- **Use Shape:** "Exploded to {us_peak} then broke momentum."
+
 **INPUT DATA INTERPRETATION:**
 - **Raw Growth:** {us_growth}% (US) / {global_growth}% (Global).
 - **Trend Label:** "{trend_label}". If this says "Falling Knife" or "Cooling", the asset is distressed.
@@ -340,8 +346,8 @@ Your goal is to write a PRIVATE INTERNAL BRIEFING for the COO.
    - <b>Rationale</b>: (Use Logic above).
 4. <b>The Leverage</b>: Identify the structural weakness (e.g. "Broken momentum" or "Us streams dropped 15% since launch").
 5. <b>The Ammo (Internal Only)</b>:
-   - (Stat 1: US Drop or Growth).
-   - (Stat 2: Global Drop or Growth).
+   - (Stat 1: US Narrative - e.g. "Down {us_drop}% from peak just {us_weeks_ago} weeks ago").
+   - (Stat 2: Global Narrative - e.g. "Momentum broken; dropping {gl_wow}% week-over-week").
    - <b>Strategy</b>: (One phrase tactical instruction).
 6. <b>COO Verdict</b>:
    - "Breakeven in {breakeven} mo." (<b>Grade: Safe/Stretch/Risky</b>).
@@ -683,40 +689,48 @@ strategy_html = f"""
 
 if openai_api_key:
     # -------------------------------------------------------------------------
-    # 1. METRIC HELPERS
+    # 1. NARRATIVE METRIC HELPERS
     # -------------------------------------------------------------------------
-    def get_drop_from_peak(data):
+    def get_peak_context(data):
+        """Returns (Peak Value, Weeks Ago)"""
         real_data = [x for x in data if x > 0]
-        if not real_data: return 0.0
+        if not real_data: return 0, 0
         peak = max(real_data)
-        current = real_data[-1]
+        # Find index of peak in the ORIGINAL list (handling 0s correctly)
+        # We search from the end to find the most recent peak if ties exist
+        indices = [i for i, x in enumerate(data) if x == peak]
+        peak_idx = indices[-1] 
+        weeks_ago = len(data) - 1 - peak_idx
+        return peak, weeks_ago
+
+    def get_wow_change(data):
+        """Returns % change from Last Week to This Week"""
+        if len(data) < 2: return 0.0
+        curr = data[-1]
+        prev = data[-2]
+        if prev == 0: return 0.0
+        return (curr - prev) / prev
+
+    def get_drop_from_peak(current, peak):
         if peak == 0: return 0.0
         return (current - peak) / peak
-
-    def get_smart_growth(data):
-        real_data = [x for x in data if x > 0]
-        if len(real_data) < 2: return 0.0
-        start = real_data[0]
-        current = real_data[-1]
-        return (current - start) / start
-
-    def get_raw_stats(data):
-        """Returns (Current, Peak) tuple"""
-        if not data: return 0, 0
-        return data[-1], max(data)
 
     try:
         with st.spinner("✨ Analyzing Deal Data with AI Consultant..."):
             # -----------------------------------------------------------------
-            # 2. CALCULATE METRICS
+            # 2. CALCULATE NARRATIVE METRICS
             # -----------------------------------------------------------------
-            us_growth = get_smart_growth(us_history)
-            us_drop = get_drop_from_peak(us_history)
-            us_curr, us_peak = get_raw_stats(us_history)
-            
-            gl_growth = get_smart_growth(global_history)
-            gl_drop = get_drop_from_peak(global_history)
-            gl_curr, gl_peak = get_raw_stats(global_history)
+            # US Context
+            us_curr = us_history[-1]
+            us_peak, us_weeks_ago = get_peak_context(us_history)
+            us_drop = get_drop_from_peak(us_curr, us_peak)
+            us_wow = get_wow_change(us_history)
+
+            # Global Context
+            gl_curr = global_history[-1]
+            gl_peak, gl_weeks_ago = get_peak_context(global_history)
+            gl_drop = get_drop_from_peak(gl_curr, gl_peak)
+            gl_wow = get_wow_change(global_history)
 
             # -----------------------------------------------------------------
             # 3. AI GENERATION
@@ -727,42 +741,49 @@ if openai_api_key:
 You are a Senior Deal Strategist advising the COO. 
 Your output is a PRIVATE INTERNAL BRIEFING. 
 
-**1. RATIONALE LOGIC:**
-- **Aggressive:** "Betting on a rebound; paying for potential."
-- **Conservative:** "Pricing to mitigate downside risk."
+**NARRATIVE RULES (Tell the Story):**
+- **Don't just list numbers.** Give context.
+- **Use Time:** "Peak was just {us_weeks_ago} weeks ago."
+- **Use Velocity:** "Dropped {us_wow}% week-over-week."
+- **Use Shape:** "Exploded to {us_peak} then broke momentum."
 
-**2. AMMO LOGIC (Select the most damaging fact):**
-- **Cooling/Falling:** CITE THE DROP. (e.g. "US streams dropped {us_drop}% from peak.")
-- **Growth:** CITE THE RAW % (e.g. "Raw growth is +{us_growth}%, but base is small.")
-- **Strategy Bullet:** Give a specific 3-word tactical instruction (e.g. "Anchor Low," "Salvage Value Offer," "Fair Market Deal").
+**STRATEGY LOGIC:**
+- **Aggressive:** "Betting on a rebound."
+- **Conservative:** "Pricing to mitigate the active crash."
 
 **OUTPUT FORMAT (Strict HTML):**
 1. <b>The Data</b>:
    - US: {us_curr} (Peak: {us_peak})
    - Global: {gl_curr} (Peak: {gl_peak})
-2. <b>The Read</b>: 1 blunt sentence on the asset quality.
+2. <b>The Read</b>: 1 blunt sentence on the momentum (e.g. "Viral launch that hit a wall 2 weeks ago").
 3. <b>The Playbook</b>:
    - <b>Open</b>: ${conservative}
    - <b>Target</b>: ${target} ({strategy})
-   - <b>Rationale</b>: (Use Logic above).
-4. <b>The Leverage</b>: Identify the structural weakness (e.g. "Broken momentum").
+   - <b>Rationale</b>: (Why this price?).
+4. <b>The Leverage</b>: Identify the weakness (e.g. "Broken momentum," "Empty catalog").
 5. <b>The Ammo (Internal Only)</b>:
-   - (Stat 1: US Drop or Growth).
-   - (Stat 2: Global Drop or Growth).
+   - (Stat 1: US Narrative - e.g. "Down {us_drop}% from peak just {us_weeks_ago} weeks ago").
+   - (Stat 2: Global Narrative - e.g. "Momentum broken; dropping {gl_wow}% week-over-week").
    - <b>Strategy</b>: (One phrase tactical instruction).
 6. <b>COO Verdict</b>:
    - "Breakeven in {breakeven} mo." (<b>Grade: Safe/Stretch/Risky</b>).
 """
 
-            # Fill Prompt with Pre-Calculated Math
+            # Fill Prompt with Narrative Data
             system_prompt = system_prompt.format(
                 strategy=strategy_name,
-                us_drop=f"{us_drop*100:.1f}",
-                us_growth=f"{us_growth*100:.0f}",
                 us_curr=f"{us_curr:,.0f}",
                 us_peak=f"{us_peak:,.0f}",
+                us_weeks_ago=us_weeks_ago,
+                us_drop=f"{us_drop*100:.1f}",
+                us_wow=f"{us_wow*100:.1f}",
+                
                 gl_curr=f"{gl_curr:,.0f}",
                 gl_peak=f"{gl_peak:,.0f}",
+                gl_weeks_ago=gl_weeks_ago,
+                gl_drop=f"{gl_drop*100:.1f}",
+                gl_wow=f"{gl_wow*100:.1f}",
+
                 conservative=f"{conservative_offer:,.0f}",
                 target=f"{selected_advance:,.0f}",
                 breakeven=f"{lbl_recoup_mo:.1f}"
@@ -771,9 +792,9 @@ Your output is a PRIVATE INTERNAL BRIEFING.
             user_prompt = f"""
 **Case Data:**
 - Selected Strategy: {strategy_name}
-- US Drop from Peak: {us_drop*100:.1f}%
-- Global Drop from Peak: {gl_drop*100:.1f}%
-- Trend Label: {us_trend_sel}
+- US Trend: {us_trend_sel} (Peak {us_weeks_ago} wks ago)
+- Global Trend: {ex_us_trend_sel} (Peak {gl_weeks_ago} wks ago)
+- US WoW Change: {us_wow*100:.1f}%
 """
             
             response = client.chat.completions.create(
