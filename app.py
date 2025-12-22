@@ -308,67 +308,39 @@ def generate_ai_strategy(api_key, context_data):
         client = openai.OpenAI(api_key=api_key)
         
         system_prompt = """
+You are an internal deal advisor to the COO of a record label.
+Write for an expert (no “client-facing script”, no dialogue, no fluff).
+Be concise and data-led.
 
-You are an internal deal strategist for a record label, advising the COO (expert buyer).
+Hard rules:
+- Use ONLY the numeric values provided in the input JSON. Do NOT invent new dollar amounts, months, points, or percentages.
+- Trend labels may contain % values that are safety caps / buckets (NOT measured slopes). If a trend label includes a %, do NOT restate the % as “the trend is X%”. Treat it as a label and, if relevant, say “(capped bucket)”.
+- If history_points < 8, explicitly call out “insufficient history” and treat trend as a risk bucket, not precision.
 
-Be ruthless, data-driven, and concise.
+Output format EXACTLY:
 
-
-
-Rules:
-
-- DO NOT write dialogue or a script to the artist. No quotes.
-
-- Output MUST be under 120 words.
-
-- Use bullets and numbers. No fluff. No generic “relationship” advice.
-
-- If trends are Cooling/Decay/Falling Knife/New Artist, emphasize downside protection.
-
-"""
+1) READ: <one line reality>
+2) POSTURE: 
+- Anchor: <must be one of offer_matrix values>
+- Target: <must be one of offer_matrix values>
+- Walkaway: <must be one of offer_matrix values>
+3) BACK-POCKET FACTS: (3 bullets, each must reference a provided metric/value)
+4) IF THEY PUSH: (2 bullets, give/get terms — NO new numbers)
+""".strip()
         
         user_prompt = f"""
+INPUT_JSON:
+{json.dumps(context_data, indent=2)}
 
-DEAL INPUTS
-
-- US trend: {context_data['us_trend']}
-
-- Intl trend: {context_data['ex_us_trend']}
-
-- Floor (52wk gross): ${context_data['floor']:,.0f}
-
-- Ceiling (52wk gross): ${context_data['ceiling']:,.0f}
-
-- Proposed advance: ${context_data['advance']:,.0f}
-
-- Label breakeven (months): {context_data['label_breakeven_months']:.1f}
-
-- Artist recoup (months): {context_data['artist_recoup_months']:.1f}
-
-
-
-TASK
-
-Write an internal COO brief with exactly these sections:
-
-
-
-1) READ (1 line): what the data says (momentum + valuation shape).
-
-2) POSTURE (3 bullets): Anchor / Walkaway / Stretch (each with $ + 1 rationale).
-
-3) BACK-POCKET FACTS (3 bullets): numbers/phrases to use in negotiation (data only).
-
-4) CONCESSION LADDER (2 bullets): what you give + what you demand in return (measurable).
-
-
-
-Keep it tight. No dialogue. No filler.
-
-"""
+Task:
+Using INPUT_JSON only, produce the 4 sections above.
+Make sure POSTURE aligns to deal_reality_check.selected_option (i.e., talk about the selected scenario and its breakeven/recoup).
+""".strip()
         
         response = client.chat.completions.create(
-            model="gpt-5.2", # Using latest available model as proxy for 5.2
+            model="gpt-4o", # Using robust default model (gpt-5.2 is not standard)
+            temperature=0.2,
+            max_tokens=250,
             messages=[
                 {"role": "system", "content": system_prompt},
                 {"role": "user", "content": user_prompt}
@@ -676,25 +648,51 @@ st.markdown("#### 4. Buyer's Strategy Script")
 strategy_html = f"""
 <div class="strategy-box">
     <strong>NEGOTIATION SCRIPT:</strong><br><br>
-    \"Based on the analysis of the last 8 weeks, we see a <strong>{us_trend_sel}</strong> trend.\"<br><br>
+    "Based on the analysis of the last 8 weeks, we see a <strong>{us_trend_sel}</strong> trend."<br><br>
     1. <strong>Anchor:</strong> Start at <strong>${conservative_offer:,.0f}</strong>.<br>
     2. <strong>Rationalize:</strong> Our risk-adjusted floor is <strong>${floor_gross:,.0f}</strong> given market volatility.<br>
-    3. <strong>Close:</strong> If we stretch to <strong>${ceil_gross:,.0f}</strong>, the artist won't see royalties for <strong>{art_recoup_mo:.1f} months</strong>.\"
+    3. <strong>Close:</strong> If we stretch to <strong>${ceil_gross:,.0f}</strong>, the artist won't see royalties for <strong>{art_recoup_mo:.1f} months</strong>."
 </div>
 """
 
 if openai_api_key:
     try:
         with st.spinner("✨ Generating AI Strategy..."):
+            # UPDATED: Full Context Data for AI
             context_data = {
-                "us_trend": us_trend_sel,
-                "ex_us_trend": ex_us_trend_sel,
-                "floor": floor_gross,
-                "ceiling": ceil_gross,
-                "advance": selected_advance,
-                "label_breakeven_months": lbl_recoup_mo,
-                "artist_recoup_months": art_recoup_mo,
+                "meta": {
+                    "input_mode": input_mode,
+                    "history_points": {
+                        "us": len([x for x in us_history if x != 0]),
+                        "global": len([x for x in global_history if x != 0]),
+                    },
+                    "trend_note": "Trend labels are risk buckets; any % shown may be a safety cap and not a measured slope."
+                },
+                "trend": {
+                    "us_label": us_trend_sel,
+                    "intl_label": ex_us_trend_sel,
+                },
+                "valuation": {
+                    "floor": float(floor_gross),
+                    "ceiling": float(ceil_gross),
+                },
+                "offer_matrix": {
+                    "conservative": float(conservative_offer),
+                    "target_floor": float(floor_gross),
+                    "target_ceiling": float(ceil_gross),
+                    "aggressive": float(aggressive_offer),
+                },
+                "deal_reality_check": {
+                    "selected_option": selected_option,       # e.g. "Aggressive (110% of Ceiling)"
+                    "strategy_name": strategy_name,           # e.g. "Aggressive"
+                    "selected_advance": float(selected_advance),
+                    "label_breakeven_months": float(lbl_recoup_mo),
+                    "artist_recoup_months": float(art_recoup_mo),
+                    "label_profit_at_recoup": float(label_profit_at_recoup),
+                    "artist_share_pct": float(artist_share_pct),
+                }
             }
+            
             ai_output = generate_ai_strategy(openai_api_key, context_data)
             
             # Display AI Output
