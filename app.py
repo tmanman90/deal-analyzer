@@ -308,86 +308,73 @@ def generate_ai_strategy(api_key, context_data):
         client = openai.OpenAI(api_key=api_key)
         
         system_prompt = """
-You are an internal deal advisor to the COO of a record label.
-Write for an expert (no “client-facing script”, no dialogue, no fluff).
-Be concise and data-led.
 
-Hard rules:
-- Use ONLY the numeric values provided in the input JSON. Do NOT invent new dollar amounts, months, points, or percentages.
-- Trend labels may contain % values that are safety caps / buckets (NOT measured slopes). If a trend label includes a %, do NOT restate the % as “the trend is X%”. Treat it as a label and, if relevant, say “(capped bucket)”.
-- If history_points < 8, explicitly call out “insufficient history” and treat trend as a risk bucket, not precision.
+You are an internal deal strategist for a record label, advising the COO (expert buyer).
 
-Output format EXACTLY:
+Be ruthless, data-driven, and concise.
 
-1) READ: <one line reality>
-2) POSTURE: 
-- Anchor: <must be one of offer_matrix values>
-- Target: <must be one of offer_matrix values>
-- Walkaway: <must be one of offer_matrix values>
-3) BACK-POCKET FACTS: (3 bullets, each must reference a provided metric/value)
-4) IF THEY PUSH: (2 bullets, give/get terms — NO new numbers)
-""".strip()
+
+
+Rules:
+
+- DO NOT write dialogue or a script to the artist. No quotes.
+
+- Output MUST be under 120 words.
+
+- Use bullets and numbers. No fluff. No generic “relationship” advice.
+
+- If trends are Cooling/Decay/Falling Knife/New Artist, emphasize downside protection.
+
+"""
         
         user_prompt = f"""
-INPUT_JSON:
-{json.dumps(context_data, indent=2)}
 
-Task:
-Using INPUT_JSON only, produce the 4 sections above.
-Make sure POSTURE aligns to deal_reality_check.selected_option (i.e., talk about the selected scenario and its breakeven/recoup).
-""".strip()
+DEAL INPUTS
+
+- US trend: {context_data['us_trend']}
+
+- Intl trend: {context_data['ex_us_trend']}
+
+- Floor (52wk gross): ${context_data['floor']:,.0f}
+
+- Ceiling (52wk gross): ${context_data['ceiling']:,.0f}
+
+- Proposed advance: ${context_data['advance']:,.0f}
+
+- Label breakeven (months): {context_data['label_breakeven_months']:.1f}
+
+- Artist recoup (months): {context_data['artist_recoup_months']:.1f}
+
+
+
+TASK
+
+Write an internal COO brief with exactly these sections:
+
+
+
+1) READ (1 line): what the data says (momentum + valuation shape).
+
+2) POSTURE (3 bullets): Anchor / Walkaway / Stretch (each with $ + 1 rationale).
+
+3) BACK-POCKET FACTS (3 bullets): numbers/phrases to use in negotiation (data only).
+
+4) CONCESSION LADDER (2 bullets): what you give + what you demand in return (measurable).
+
+
+
+Keep it tight. No dialogue. No filler.
+
+"""
         
         response = client.chat.completions.create(
             model="gpt-5.2", # Using latest available model as proxy for 5.2
-            temperature=0.2,
-            max_completion_tokens=250,
             messages=[
                 {"role": "system", "content": system_prompt},
                 {"role": "user", "content": user_prompt}
             ]
         )
-
-        # Robust text extraction across SDK/model variants
-        text = None
-        try:
-            choice0 = response.choices[0]
-            msg = getattr(choice0, "message", None)
-            content = getattr(msg, "content", None) if msg else None
-
-            if isinstance(content, str):
-                text = content
-            elif isinstance(content, list):
-                parts = []
-                for p in content:
-                    if isinstance(p, str):
-                        parts.append(p)
-                    elif isinstance(p, dict):
-                        if isinstance(p.get("text"), str):
-                            parts.append(p["text"])
-                        elif p.get("type") == "text" and isinstance(p.get("text"), str):
-                            parts.append(p["text"])
-                        elif isinstance(p.get("content"), str):
-                            parts.append(p["content"])
-                    else:
-                        t = getattr(p, "text", None)
-                        if isinstance(t, str):
-                            parts.append(t)
-                text = "
-".join([x for x in parts if x])
-        except Exception:
-            text = None
-
-        # Some SDK/model combos expose output_text
-        if (not text) and hasattr(response, "output_text"):
-            try:
-                text = response.output_text
-            except Exception:
-                pass
-
-        if not text or not str(text).strip():
-            return "⚠️ AI returned an empty response. Try again (or loosen constraints / increase max tokens)."
-
-        return str(text).strip()
+        return response.choices[0].message.content
 
     except AttributeError:
         return "⚠️ Error: It looks like you have an older version of the OpenAI library installed. Please run `pip install --upgrade openai` in your terminal."
@@ -700,56 +687,26 @@ if openai_api_key:
     try:
         with st.spinner("✨ Generating AI Strategy..."):
             context_data = {
-                "meta": {
-                    "input_mode": input_mode,
-                    "history_points": {
-                        "us": len([x for x in us_history if x != 0]),
-                        "global": len([x for x in global_history if x != 0]),
-                    },
-                    "trend_note": "Trend labels are risk buckets; any % shown may be a safety cap and not a measured slope."
-                },
-                "trend": {
-                    "us_label": us_trend_sel,
-                    "intl_label": ex_us_trend_sel,
-                },
-                "valuation": {
-                    "floor": float(floor_gross),
-                    "ceiling": float(ceil_gross),
-                },
-                "offer_matrix": {
-                    "conservative": float(conservative_offer),
-                    "target_floor": float(floor_gross),
-                    "target_ceiling": float(ceil_gross),
-                    "aggressive": float(aggressive_offer),
-                },
-                "deal_reality_check": {
-                    "selected_option": selected_option,
-                    "strategy_name": strategy_name,
-                    "selected_advance": float(selected_advance),
-                    "label_breakeven_months": float(lbl_recoup_mo),
-                    "artist_recoup_months": float(art_recoup_mo),
-                    "label_profit_at_recoup": float(label_profit_at_recoup),
-                    "artist_share_pct": float(artist_share_pct),
-                }
+                "us_trend": us_trend_sel,
+                "ex_us_trend": ex_us_trend_sel,
+                "floor": floor_gross,
+                "ceiling": ceil_gross,
+                "advance": selected_advance,
+                "label_breakeven_months": lbl_recoup_mo,
+                "artist_recoup_months": art_recoup_mo,
             }
             ai_output = generate_ai_strategy(openai_api_key, context_data)
-
-            # Display AI Output (with guardrails)
-            if not ai_output or not str(ai_output).strip():
-                st.error("⚠️ AI returned empty text. Falling back to the standard script. Open Debug below to see what was sent.")
-                st.markdown(strategy_html, unsafe_allow_html=True)
-                with st.expander("Debug: INPUT_JSON sent to model"):
-                    st.json(context_data)
-            else:
-                st.markdown(f"""
-                <div class=\"strategy-box\" style=\"border-left: 5px solid #7c4dff;\">
-                    <strong>🤖 AI EXECUTIVE ADVISOR:</strong><br><br>
-                    {(str(ai_output)).replace(chr(10), '<br>')}
-                </div>
-                """, unsafe_allow_html=True)
-
-                with st.expander("View Raw Output"):
-                    st.write(ai_output)
+            
+            # Display AI Output
+            st.markdown(f"""
+            <div class="strategy-box" style="border-left: 5px solid #7c4dff;">
+                <strong>🤖 AI EXECUTIVE ADVISOR:</strong><br><br>
+                {ai_output.replace(chr(10), '<br>')}
+            </div>
+            """, unsafe_allow_html=True)
+            
+            with st.expander("View Raw Output"):
+                st.write(ai_output)
                 
     except Exception as e:
         st.error(f"AI Error: {str(e)}")
