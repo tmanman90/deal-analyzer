@@ -4,6 +4,7 @@ import numpy as np
 import math
 import base64
 import json
+import openai # Added for AI Integration
 
 # -----------------------------------------------------------------------------
 # CONFIG & STYLES
@@ -286,6 +287,36 @@ def calculate_recoupment(advance, revenue_stream, artist_share, final_week_rev):
     return label_months, artist_months
 
 # -----------------------------------------------------------------------------
+# AI GENERATOR FUNCTION
+# -----------------------------------------------------------------------------
+def generate_ai_strategy(api_key, context_data):
+    """
+    Generates a negotiation strategy using OpenAI API.
+    """
+    client = openai.OpenAI(api_key=api_key)
+    
+    system_prompt = "You are a senior, ruthless, but fair Record Label Executive (A&R). You are advising a junior A&R on how to close a deal. Be concise, strategic, and specific."
+    
+    user_prompt = f"""
+    The artist's US Trend is {context_data['us_trend']}.
+    The International Trend is {context_data['ex_us_trend']}.
+    We calculated a Risk Floor of ${context_data['floor']:,.0f} and a Ceiling of ${context_data['ceiling']:,.0f}.
+    The artist takes {context_data['recoup_months']:.1f} months to recoup at the Ceiling price.
+    
+    Task: Write a 3-step negotiation script (Anchor, Rationalize, Close) specifically tailored to these trends (e.g., mention the 'Falling Knife' or 'New Artist' risks if present).
+    """
+    
+    response = client.chat.completions.create(
+        model="gpt-4o", # Using latest available model as proxy for 5.2
+        messages=[
+            {"role": "system", "content": system_prompt},
+            {"role": "user", "content": user_prompt}
+        ]
+    )
+    
+    return response.choices[0].message.content
+
+# -----------------------------------------------------------------------------
 # SIDEBAR - INPUTS
 # -----------------------------------------------------------------------------
 with st.sidebar:
@@ -376,6 +407,12 @@ with st.sidebar:
 
     st.markdown("---")
     
+    # NEW: OpenAI API Input
+    st.subheader("🤖 AI Advisor")
+    openai_api_key = st.text_input("OpenAI API Key", type="password", help="Enter key to unlock AI strategies.")
+    
+    st.markdown("---")
+    
     # -------------------------------------------------------------------------
     # SHARE FUNCTIONALITY
     # -------------------------------------------------------------------------
@@ -416,7 +453,7 @@ with st.sidebar:
         st.caption("Raw Code (if needed):")
         st.code(share_url, language="text")
 
-    st.caption("Deal Analyzer v2.3 | URL Safe Sharing")
+    st.caption("Deal Analyzer v2.3 | AI Powered")
 
 # -----------------------------------------------------------------------------
 # MAIN APP LOGIC
@@ -570,6 +607,7 @@ with c3:
 # -----------------------------------------------------------------------------
 st.markdown("#### 4. Buyer's Strategy Script")
 
+# Default Static HTML (Preserved for fallback)
 strategy_html = f"""
 <div class="strategy-box">
     <strong>NEGOTIATION SCRIPT:</strong><br><br>
@@ -579,4 +617,34 @@ strategy_html = f"""
     3. <strong>Close:</strong> If we stretch to <strong>${ceil_gross:,.0f}</strong>, the artist won't see royalties for <strong>{art_recoup_mo:.1f} months</strong>."
 </div>
 """
-st.markdown(strategy_html, unsafe_allow_html=True)
+
+if openai_api_key:
+    try:
+        with st.spinner("✨ Generating AI Strategy..."):
+            context_data = {
+                "us_trend": us_trend_sel,
+                "ex_us_trend": ex_us_trend_sel,
+                "floor": floor_gross,
+                "ceiling": ceil_gross,
+                "recoup_months": art_recoup_mo
+            }
+            ai_output = generate_ai_strategy(openai_api_key, context_data)
+            
+            # Display AI Output
+            st.markdown(f"""
+            <div class="strategy-box" style="border-left: 5px solid #7c4dff;">
+                <strong>🤖 AI EXECUTIVE ADVISOR:</strong><br><br>
+                {ai_output.replace(chr(10), '<br>')}
+            </div>
+            """, unsafe_allow_html=True)
+            
+            with st.expander("View Raw Output"):
+                st.write(ai_output)
+                
+    except Exception as e:
+        st.error(f"AI Error: {str(e)}")
+        st.caption("Falling back to standard script...")
+        st.markdown(strategy_html, unsafe_allow_html=True)
+else:
+    # Fallback to existing static script
+    st.markdown(strategy_html, unsafe_allow_html=True)
