@@ -312,34 +312,39 @@ def generate_ai_strategy(api_key, context_data):
         trend_label = context_data['trend']['us_label']
         
         system_prompt = """
-You are a Senior Deal Strategist advising the COO. 
-Your output is an INTERNAL BRIEFING, not a script for the artist.
+You are a ruthless and experienced Deal Strategist for a Record Label's COO. 
+Your goal is to write a PRIVATE INTERNAL BRIEFING for the COO.
 
-**1. RECOUPMENT GRADING SCALE (Label Breakeven):**
-- **< 9 Months:** INCREDIBLE. (Safe, No-Brainer).
-- **9 - 12 Months:** TARGET. (This is our goal).
-- **12 - 15 Months:** STRETCH. (Acceptable for viral hits).
-- **> 15 Months:** RISKY. (Requires high conviction).
+**INPUT DATA INTERPRETATION:**
+- **Raw Growth:** {us_growth}% (US) / {global_growth}% (Global).
+- **Trend Label:** "{trend_label}". If this says "Falling Knife" or "Cooling", the asset is distressed.
+- **Leverage:** Artist Recoupment is {recoup} months.
 
-**2. AMMO GENERATION RULES (Internal Data Points):**
-- **If "Cooling" or "Falling Knife":** Highlight the speed of the drop. (e.g. "US volume is down X% from peak.")
-- **If "Stable" but Low Growth:** Highlight the ceiling. (e.g. "Upside is capped; we are paying for stability, not a rocket ship.")
-- **If "New Artist":** Highlight the lack of catalog. (e.g. "Zero back catalog to cushion us if the single fails.")
-- **If Global > US:** Highlight the value gap. (e.g. "Global volume is high, but US ad rates are low. Revenue quality is poor.")
+**1. RATIONALE LOGIC:**
+- **Aggressive:** "Betting on a rebound; paying for potential."
+- **Conservative:** "Pricing to mitigate downside risk."
 
-**OUTPUT FORMAT (Strict HTML):**
-1. <b>The Read</b>: 1 blunt sentence on the asset quality.
-2. <b>The Playbook</b>:
-   - <b>Open</b>: {anchor}
-   - <b>Target</b>: {target}
-   - <b>Rationale</b>: One sentence justifying the price.
-3. <b>The Leverage</b>: The single biggest structural weakness in the deal (e.g. "Recoupment time," "Declining trend," "Empty catalog").
-4. <b>The Ammo (Internal Stats)</b>:
-   - List 2-3 hard data points the COO can use in the room.
-   - *Example Style:* "Raw US growth is only +{us_growth}%, proving the viral moment is over."
-   - *Example Style:* "Global growth (+{global_growth}%) is masking the fact that US streams are flat."
-5. <b>COO Verdict</b>:
-   - "Breakeven in {breakeven} mo." (<b>GRADE THIS using the Scale above</b>).
+**2. AMMO LOGIC (Select the most damaging fact):**
+- **Cooling/Falling:** CITE THE DROP. (e.g. "US streams dropped {us_drop}% from peak.")
+- **Growth:** CITE THE RAW % (e.g. "Raw growth is +{us_growth}%, but base is small.")
+- **Strategy Bullet:** Give a specific 3-word tactical instruction (e.g. "Anchor Low," "Salvage Value Offer," "Fair Market Deal").
+
+   **OUTPUT FORMAT (Strict HTML):**
+1. <b>The Data</b>:
+   - US: {us_curr} (Peak: {us_peak})
+   - Global: {gl_curr} (Peak: {gl_peak})
+2. <b>The Read</b>: 1 blunt sentence on the asset quality.(e.g. "High-risk viral moment that is already fading").
+3. <b>The Playbook</b>:
+   - <b>Open</b>: ${conservative}
+   - <b>Target</b>: ${target} ({strategy})
+   - <b>Rationale</b>: (Use Logic above).
+4. <b>The Leverage</b>: Identify the structural weakness (e.g. "Broken momentum" or "Us streams dropped 15% since launch").
+5. <b>The Ammo (Internal Only)</b>:
+   - (Stat 1: US Drop or Growth).
+   - (Stat 2: Global Drop or Growth).
+   - <b>Strategy</b>: (One phrase tactical instruction).
+6. <b>COO Verdict</b>:
+   - "Breakeven in {breakeven} mo." (<b>Grade: Safe/Stretch/Risky</b>).
 """
 
         # Format System Prompt
@@ -357,13 +362,13 @@ Your output is an INTERNAL BRIEFING, not a script for the artist.
 **Analyze this specific case:**
 - **Raw US Growth:** {us_growth_pct:+.1f}%
 - **Raw Global Growth:** {global_growth_pct:+.1f}%
-- **Trend Label:** {trend_label}
-- **Label Breakeven:** {context_data['deal_reality_check']['label_breakeven_months']:.1f} Months
+- **Risk Label:** {trend_label}
+- **Selected Strategy:** {context_data['deal_reality_check']['strategy_name']}
 """
         
         response = client.chat.completions.create(
             model="gpt-4o", 
-            temperature=0.6,
+            temperature=0.7,
             messages=[
                 {"role": "system", "content": system_prompt},
                 {"role": "user", "content": user_prompt}
@@ -661,11 +666,11 @@ with c3:
     st.metric("Label Profit @ Recoup", f"${label_profit_at_recoup:,.0f}", help="Net profit when artist recoups")
 
 # -----------------------------------------------------------------------------
-# SECTION 4: BUYER'S STRATEGY (UPDATED LOGIC)
+# SECTION 4: BUYER'S STRATEGY
 # -----------------------------------------------------------------------------
 st.markdown("#### 4. Buyer's Strategy Script")
 
-# Default Static HTML
+# Default Static HTML (Preserved for fallback)
 strategy_html = f"""
 <div class="strategy-box">
     <strong>NEGOTIATION SCRIPT:</strong><br><br>
@@ -677,55 +682,110 @@ strategy_html = f"""
 """
 
 if openai_api_key:
-    # UPDATED: Smart Growth Calculator (Handles New Artists/Zeros)
-    def get_smart_growth(data):
-        # Filter out the padded zeros to find true history
+    # -------------------------------------------------------------------------
+    # 1. METRIC HELPERS
+    # -------------------------------------------------------------------------
+    def get_drop_from_peak(data):
         real_data = [x for x in data if x > 0]
-        
-        # Need at least 2 points to calculate a trend
-        if len(real_data) < 2: 
-            return 0.0
-            
-        # Compare Current Week vs. The First Week they appeared
-        start_val = real_data[0]
-        current_val = real_data[-1]
-        
-        return (current_val - start_val) / start_val
+        if not real_data: return 0.0
+        peak = max(real_data)
+        current = real_data[-1]
+        if peak == 0: return 0.0
+        return (current - peak) / peak
+
+    def get_smart_growth(data):
+        real_data = [x for x in data if x > 0]
+        if len(real_data) < 2: return 0.0
+        start = real_data[0]
+        current = real_data[-1]
+        return (current - start) / start
+
+    def get_raw_stats(data):
+        """Returns (Current, Peak) tuple"""
+        if not data: return 0, 0
+        return data[-1], max(data)
 
     try:
         with st.spinner("✨ Analyzing Deal Data with AI Consultant..."):
-            # Calculate Smart Growth (Since Launch)
-            us_raw = get_smart_growth(us_history)
-            global_raw = get_smart_growth(global_history)
+            # -----------------------------------------------------------------
+            # 2. CALCULATE METRICS
+            # -----------------------------------------------------------------
+            us_growth = get_smart_growth(us_history)
+            us_drop = get_drop_from_peak(us_history)
+            us_curr, us_peak = get_raw_stats(us_history)
+            
+            gl_growth = get_smart_growth(global_history)
+            gl_drop = get_drop_from_peak(global_history)
+            gl_curr, gl_peak = get_raw_stats(global_history)
 
-            context_data = {
-                "raw_metrics": {
-                    "us_growth_pct": us_raw,
-                    "global_growth_pct": global_raw
-                },
-                "trend": {
-                    "us_label": us_trend_sel,
-                    "intl_label": ex_us_trend_sel,
-                },
-                "valuation": {
-                    "floor": float(floor_gross),
-                    "ceiling": float(ceil_gross),
-                },
-                "offer_matrix": {
-                    "conservative": float(conservative_offer),
-                },
-                "deal_reality_check": {
-                    "strategy_name": strategy_name,
-                    "selected_advance": float(selected_advance),
-                    "label_breakeven_months": float(lbl_recoup_mo),
-                    "artist_recoup_months": float(art_recoup_mo),
-                }
-            }
+            # -----------------------------------------------------------------
+            # 3. AI GENERATION
+            # -----------------------------------------------------------------
+            client = openai.OpenAI(api_key=openai_api_key)
             
-            ai_output = generate_ai_strategy(openai_api_key, context_data)
+            system_prompt = """
+You are a Senior Deal Strategist advising the COO. 
+Your output is a PRIVATE INTERNAL BRIEFING. 
+
+**1. RATIONALE LOGIC:**
+- **Aggressive:** "Betting on a rebound; paying for potential."
+- **Conservative:** "Pricing to mitigate downside risk."
+
+**2. AMMO LOGIC (Select the most damaging fact):**
+- **Cooling/Falling:** CITE THE DROP. (e.g. "US streams dropped {us_drop}% from peak.")
+- **Growth:** CITE THE RAW % (e.g. "Raw growth is +{us_growth}%, but base is small.")
+- **Strategy Bullet:** Give a specific 3-word tactical instruction (e.g. "Anchor Low," "Salvage Value Offer," "Fair Market Deal").
+
+**OUTPUT FORMAT (Strict HTML):**
+1. <b>The Data</b>:
+   - US: {us_curr} (Peak: {us_peak})
+   - Global: {gl_curr} (Peak: {gl_peak})
+2. <b>The Read</b>: 1 blunt sentence on the asset quality.
+3. <b>The Playbook</b>:
+   - <b>Open</b>: ${conservative}
+   - <b>Target</b>: ${target} ({strategy})
+   - <b>Rationale</b>: (Use Logic above).
+4. <b>The Leverage</b>: Identify the structural weakness (e.g. "Broken momentum").
+5. <b>The Ammo (Internal Only)</b>:
+   - (Stat 1: US Drop or Growth).
+   - (Stat 2: Global Drop or Growth).
+   - <b>Strategy</b>: (One phrase tactical instruction).
+6. <b>COO Verdict</b>:
+   - "Breakeven in {breakeven} mo." (<b>Grade: Safe/Stretch/Risky</b>).
+"""
+
+            # Fill Prompt with Pre-Calculated Math
+            system_prompt = system_prompt.format(
+                strategy=strategy_name,
+                us_drop=f"{us_drop*100:.1f}",
+                us_growth=f"{us_growth*100:.0f}",
+                us_curr=f"{us_curr:,.0f}",
+                us_peak=f"{us_peak:,.0f}",
+                gl_curr=f"{gl_curr:,.0f}",
+                gl_peak=f"{gl_peak:,.0f}",
+                conservative=f"{conservative_offer:,.0f}",
+                target=f"{selected_advance:,.0f}",
+                breakeven=f"{lbl_recoup_mo:.1f}"
+            )
+
+            user_prompt = f"""
+**Case Data:**
+- Selected Strategy: {strategy_name}
+- US Drop from Peak: {us_drop*100:.1f}%
+- Global Drop from Peak: {gl_drop*100:.1f}%
+- Trend Label: {us_trend_sel}
+"""
             
-            # Clean up potential markdown artifacts from AI response
-            clean_output = ai_output.replace("```html", "").replace("```", "").strip()
+            response = client.chat.completions.create(
+                model="gpt-4o", 
+                temperature=0.6,
+                messages=[
+                    {"role": "system", "content": system_prompt},
+                    {"role": "user", "content": user_prompt}
+                ]
+            )
+            
+            clean_output = response.choices[0].message.content.replace("```html", "").replace("```", "").strip()
             
             st.markdown(f"""
             <div class="strategy-box" style="border-left: 5px solid #7c4dff;">
@@ -733,7 +793,7 @@ if openai_api_key:
                 {clean_output.replace(chr(10), '<br>')}
             </div>
             """, unsafe_allow_html=True)
-            
+
     except Exception as e:
         st.error(f"AI Error: {str(e)}")
         st.markdown(strategy_html, unsafe_allow_html=True)
