@@ -312,11 +312,13 @@ def generate_ai_strategy(api_key, context_data):
         trend_label = context_data['trend']['us_label']
         
         system_prompt = """
+IMPORTANT: Do not wrap output in markdown code blocks (e.g. no ```html). Return raw text only.
+
 You are a ruthless but fair Deal Strategist for a Record Label. 
 Your goal is to write a strategic brief for the COO based on the data provided.
 
 **INPUT DATA INTERPRETATION:**
-- **Raw Growth:** {us_growth}% (US) / {global_growth}% (Global). Use this to determine if the artist is Viral, Stable, or decaying.
+- **Raw Growth:** {us_growth}% / {global_growth}%. Note: For New Artists, this represents total growth since their first week of data. If this is high (+100%) but the Label says 'Cooling', it means they launched big but are now dropping.
 - **Trend Label:** "{trend_label}". If this says "Falling Knife" or "Cooling", the raw numbers might look high, but the recent weeks are crashing. TRUST THE LABEL for risk.
 - **Valuation:** We capped the valuation at a "Ceiling" of {ceiling}. 
 - **Leverage:** Artist Recoupment is {recoup} months. If >18 months, this is your main leverage (Trap).
@@ -671,19 +673,26 @@ strategy_html = f"""
 """
 
 if openai_api_key:
-    # Helper to calc raw slope for AI context
-    def get_raw_slope(data):
-        if len(data) < 8: return 0.0
-        past = sum(data[:4])/4
-        recent = sum(data[4:])/4
-        if past == 0: return 0.0
-        return (recent - past) / past
+    # UPDATED: Smart Growth Calculator (Handles New Artists/Zeros)
+    def get_smart_growth(data):
+        # Filter out the padded zeros to find true history
+        real_data = [x for x in data if x > 0]
+        
+        # Need at least 2 points to calculate a trend
+        if len(real_data) < 2: 
+            return 0.0
+            
+        # Compare Current Week vs. The First Week they appeared
+        start_val = real_data[0]
+        current_val = real_data[-1]
+        
+        return (current_val - start_val) / start_val
 
     try:
         with st.spinner("✨ Analyzing Deal Data with AI Consultant..."):
-            # Calculate Raw Growth for AI Context
-            us_raw = get_raw_slope(us_history)
-            global_raw = get_raw_slope(global_history)
+            # Calculate Smart Growth (Since Launch)
+            us_raw = get_smart_growth(us_history)
+            global_raw = get_smart_growth(global_history)
 
             context_data = {
                 "raw_metrics": {
@@ -711,10 +720,13 @@ if openai_api_key:
             
             ai_output = generate_ai_strategy(openai_api_key, context_data)
             
+            # Clean up potential markdown artifacts from AI response
+            clean_output = ai_output.replace("```html", "").replace("```", "").strip()
+            
             st.markdown(f"""
             <div class="strategy-box" style="border-left: 5px solid #7c4dff;">
                 <strong>🤖 AI EXECUTIVE ADVISOR:</strong><br><br>
-                {ai_output.replace(chr(10), '<br>')}
+                {clean_output.replace(chr(10), '<br>')}
             </div>
             """, unsafe_allow_html=True)
             
