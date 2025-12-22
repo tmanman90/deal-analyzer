@@ -308,50 +308,62 @@ def generate_ai_strategy(api_key, context_data):
         client = openai.OpenAI(api_key=api_key)
         
         system_prompt = """
-You are a senior Deal Strategist advising a Record Label COO.
-Your goal is to provide a high-level strategic assessment and a ruthlessly effective negotiation script.
+You are an internal Deal Strategist advising the COO of a record label.
+Your output is a private strategic brief for the COO, NOT a script for the artist.
 
-CRITICAL RULES:
-1. **Trend Labels are Buckets, not Stats**: If a trend label contains a percentage (e.g., "Falling Knife (-1.0%)"), that % is a safety cap, NOT the actual growth rate. NEVER say "the trend is -1.0%". Instead, describe the behavior (e.g., "Volume is crashing," "New artist hype is cooling off").
-2. **Provide Ammo, Not Just Data**: Don't just list the numbers. Explain *why* they give us leverage. (e.g., "Recoupment is 25 months; we are essentially financing their career with no near-term ROI").
-3. **No Fluff**: Be concise. No "I hope this helps."
+**TONE & STYLE:**
+- **Internal & Ruthless:** Speak colleague-to-colleague. Be direct about risk and leverage.
+- **Bold Key Terms:** Use HTML <b>tags</b> for emphasis (e.g., <b>Anchor</b>), NOT markdown stars.
+- **No Fluff:** Do not summarize the deal unless adding insight.
 
-STRUCTURE:
-1. **The Read**: One sentence summary of the asset's quality (e.g., "Distressed asset," "Stable earner").
-2. **The Script (Buyer to Artist)**:
-   - **Anchor**: State the low offer.
-   - **Rationalize**: Explain the valuation using the specific trend behavior (cooling/crashing) to justify the Floor price. Use "Risk-Adjusted" terminology.
-   - **Close**: Present the target advance and highlight the long recoupment timeline as a major concession from the label.
-3. **COO Context / Ammo (Internal Only)**:
-   - 2 bullet points giving the COO "back-pocket" ammo. Focus on risk/reward ratios, break-even timelines vs. contract length, or volatility.
-4. **If They Push**:
-   - 2 specific trading chips (e.g., Marketing spend, Term length).
+**FINANCIAL LOGIC (CRITICAL):**
+- **Label Breakeven** ({breakeven} mo): This is when WE (the label) recover our cash. Short is good (<12mo). Long is risk.
+- **Artist Recoupment** ({recoup} mo): This is when the ARTIST starts earning royalties. A long recoupment is NOT a financial risk to us (we are already profitable), but it is a **Negotiation Lever**. We use it to say: "You won't see a check for 2 years at this price."
+- **Trend Labels**: If a trend says "Cooling (-1.0%)", the % is a safety cap. Do not quote it as a statistic. Say "Momentum is breaking."
+
+**OUTPUT STRUCTURE:**
+1. <b>The Read</b>: 1 sentence on the asset quality/risk profile.
+2. <b>The Playbook</b>:
+   - <b>Open</b>: Start negotiation at {anchor}.
+   - <b>Target</b>: Land the deal at {target} (our modeled reality).
+   - <b>Rationale</b>: Why {target} is the correct price based on the trend behavior (e.g. falling knife vs stable).
+   - <b>The Trap</b>: Use the {recoup} month Artist Recoupment timeline to talk them down. (e.g. "At {target}, they are locked out of royalties for X months.")
+3. <b>COO Context</b>:
+   - 2 bullets on internal risk/reward. (e.g. "We break even in {breakeven} months, which is excellent/risky.")
+4. <b>Trading Chips</b>:
+   - 2 things to give/take if they push on the Advance.
 """
 
-        # Pre-format numbers to ensure the AI sees "$150,000" not "150000" or "target_ceiling"
+        # Pre-format numbers
         fmt_anchor = f"${context_data['offer_matrix']['conservative']:,.0f}"
-        fmt_floor = f"${context_data['valuation']['floor']:,.0f}"
-        fmt_advance = f"${context_data['deal_reality_check']['selected_advance']:,.0f}"
+        fmt_target = f"${context_data['deal_reality_check']['selected_advance']:,.0f}" # The user's selection
         fmt_recoup = f"{context_data['deal_reality_check']['artist_recoup_months']:.1f}"
+        fmt_breakeven = f"{context_data['deal_reality_check']['label_breakeven_months']:.1f}"
         trend_desc = f"{context_data['trend']['us_label']}"
 
-        user_prompt = f"""
-DATA FOR SCRIPT:
-- Anchor Price: {fmt_anchor}
-- Floor Valuation: {fmt_floor}
-- Target/Selected Advance: {fmt_advance}
-- Recoupment Time at Target: {fmt_recoup} months
-- Market Trend Label: {trend_desc}
+        # Inject dynamic values into system prompt slots
+        system_prompt = system_prompt.format(
+            anchor=fmt_anchor,
+            target=fmt_target,
+            recoup=fmt_recoup,
+            breakeven=fmt_breakeven
+        )
 
-INSTRUCTION:
-Write the strategy following the STRUCTURE exactly.
-Use the Real Numbers provided. Do NOT output placeholder text.
+        user_prompt = f"""
+**DEAL CONTEXT:**
+- **Selected Strategy:** {context_data['deal_reality_check']['strategy_name']}
+- **Market Trend:** {trend_desc}
+- **Label Breakeven:** {fmt_breakeven} months
+- **Artist Recoupment:** {fmt_recoup} months
+
+**TASK:**
+Write the 4-section Strategic Brief. Use the exact numbers provided.
 """
         
         response = client.chat.completions.create(
             model="gpt-4o", 
             temperature=0.2,
-            max_tokens=300,
+            max_tokens=350,
             messages=[
                 {"role": "system", "content": system_prompt},
                 {"role": "user", "content": user_prompt}
