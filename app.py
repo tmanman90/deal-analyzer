@@ -346,38 +346,48 @@ Your goal is to write a PRIVATE INTERNAL BRIEFING for the COO.
 6. <b>COO Verdict</b>:
    - "Breakeven in {breakeven} mo." (<b>Grade: Safe/Stretch/Risky</b>).
 """
+# Fill Prompt with Pre-Calculated Math
+            system_prompt = system_prompt.format(
+                strategy=strategy_name,
+                us_drop=f"{us_drop*100:.1f}",
+                us_growth=f"{us_growth*100:.0f}",
+                conservative=f"{conservative_offer:,.0f}",
+                target=f"{selected_advance:,.0f}",
+                breakeven=f"{lbl_recoup_mo:.1f}"
+            )
 
-        # Format System Prompt
-        system_prompt = system_prompt.format(
-            us_growth=f"{us_growth_pct:+.0f}",
-            global_growth=f"{global_growth_pct:+.0f}",
-            trend_label=trend_label,
-            anchor=f"${context_data['offer_matrix']['conservative']:,.0f}",
-            target=f"${context_data['deal_reality_check']['selected_advance']:,.0f}",
-            recoup=f"{context_data['deal_reality_check']['artist_recoup_months']:.1f}",
-            breakeven=f"{context_data['deal_reality_check']['label_breakeven_months']:.1f}"
-        )
-
-        user_prompt = f"""
-**Analyze this specific case:**
-- **Raw US Growth:** {us_growth_pct:+.1f}%
-- **Raw Global Growth:** {global_growth_pct:+.1f}%
-- **Risk Label:** {trend_label}
-- **Selected Strategy:** {context_data['deal_reality_check']['strategy_name']}
+            user_prompt = f"""
+**Case Data:**
+- Selected Strategy: {strategy_name}
+- US Drop from Peak: {us_drop*100:.1f}% (Important if < 0)
+- US Raw Growth: {us_growth*100:.0f}%
+- Global Drop from Peak: {gl_drop*100:.1f}%
+- Trend Label: {us_trend_sel}
 """
-        
-        response = client.chat.completions.create(
-            model="gpt-4o", 
-            temperature=0.7,
-            messages=[
-                {"role": "system", "content": system_prompt},
-                {"role": "user", "content": user_prompt}
-            ]
-        )
-        return response.choices[0].message.content
+            
+            response = client.chat.completions.create(
+                model="gpt-4o", 
+                temperature=0.6,
+                messages=[
+                    {"role": "system", "content": system_prompt},
+                    {"role": "user", "content": user_prompt}
+                ]
+            )
+            
+            clean_output = response.choices[0].message.content.replace("```html", "").replace("```", "").strip()
+            
+            st.markdown(f"""
+            <div class="strategy-box" style="border-left: 5px solid #7c4dff;">
+                <strong>🤖 AI EXECUTIVE ADVISOR:</strong><br><br>
+                {clean_output.replace(chr(10), '<br>')}
+            </div>
+            """, unsafe_allow_html=True)
 
     except Exception as e:
-        return f"Error connecting to OpenAI: {str(e)}"
+        st.error(f"AI Error: {str(e)}")
+        st.markdown(strategy_html, unsafe_allow_html=True)
+else:
+    st.markdown(strategy_html, unsafe_allow_html=True)
 
 # -----------------------------------------------------------------------------
 # SIDEBAR - INPUTS
