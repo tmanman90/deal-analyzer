@@ -340,7 +340,7 @@ Make sure POSTURE aligns to deal_reality_check.selected_option (i.e., talk about
         response = client.chat.completions.create(
             model="gpt-5.2", # Using latest available model as proxy for 5.2
             temperature=0.2,
-            max_tokens=250,
+            max_completion_tokens=250,
             messages=[
                 {"role": "system", "content": system_prompt},
                 {"role": "user", "content": user_prompt}
