@@ -308,37 +308,46 @@ def generate_ai_strategy(api_key, context_data):
         client = openai.OpenAI(api_key=api_key)
         
         system_prompt = """
-You are an internal deal advisor to the COO of a record label.
-Write for an expert (no “client-facing script”, no dialogue, no fluff).
-Be concise and data-led.
+You are a Negotiation Coach for a record label.
+Your goal is to write a short, punchy script for a buyer to read aloud during a negotiation.
 
-Hard rules:
-- Use ONLY the numeric values provided in the input JSON. Do NOT invent new dollar amounts, months, points, or percentages.
-- Trend labels may contain % values that are safety caps / buckets (NOT measured slopes). If a trend label includes a %, do NOT restate the % as “the trend is X%”. Treat it as a label and, if relevant, say “(capped bucket)”.
-- If history_points < 8, explicitly call out “insufficient history” and treat trend as a risk bucket, not precision.
+GUIDELINES:
+- **Be Direct**: Write exactly what the buyer should say. No "The data suggests..." or "You could say...".
+- **Use Real Numbers**: I will provide formatted strings (e.g., $105,000). Use them exactly. Do not use variable names.
+- **Structure**: 
+  1. Anchor (The low offer)
+  2. Rationalize (The "Why" - using the trend data)
+  3. Close (The "Stretch" offer + the consequence of long recoupment)
+  4. If They Push (2 specific trade-offs, like Marketing or Rights)
 
-Output format EXACTLY:
+Tone: Professional, firm, realistic.
+"""
 
-1) READ: <one line reality>
-2) POSTURE: 
-- Anchor: <must be one of offer_matrix values>
-- Target: <must be one of offer_matrix values>
-- Walkaway: <must be one of offer_matrix values>
-3) BACK-POCKET FACTS: (3 bullets, each must reference a provided metric/value)
-4) IF THEY PUSH: (2 bullets, give/get terms — NO new numbers)
-""".strip()
-        
+        # Pre-format numbers to ensure the AI sees "$150,000" not "150000" or "target_ceiling"
+        fmt_anchor = f"${context_data['offer_matrix']['conservative']:,.0f}"
+        fmt_floor = f"${context_data['valuation']['floor']:,.0f}"
+        fmt_advance = f"${context_data['deal_reality_check']['selected_advance']:,.0f}"
+        fmt_recoup = f"{context_data['deal_reality_check']['artist_recoup_months']:.1f}"
+        trend_desc = f"{context_data['trend']['us_label']}"
+
         user_prompt = f"""
-INPUT_JSON:
-{json.dumps(context_data, indent=2)}
+DATA FOR SCRIPT:
+- Anchor Price: {fmt_anchor}
+- Floor Valuation: {fmt_floor}
+- Target/Selected Advance: {fmt_advance}
+- Recoupment Time at Target: {fmt_recoup} months
+- Market Trend: {trend_desc}
 
-Task:
-Using INPUT_JSON only, produce the 4 sections above.
-Make sure POSTURE aligns to deal_reality_check.selected_option (i.e., talk about the selected scenario and its breakeven/recoup).
-""".strip()
+INSTRUCTION:
+Write the 4-point script using ONLY these numbers.
+1. **ANCHOR**: State the Anchor Price.
+2. **RATIONALIZE**: Explain that the risk-adjusted floor is {fmt_floor} because of the {trend_desc} trend.
+3. **CLOSE**: State that if we stretch to {fmt_advance}, the artist won't see royalties for {fmt_recoup} months.
+4. **IF THEY PUSH**: Give 2 bullet points on what to trade (e.g. reduce marketing, extend term).
+"""
         
         response = client.chat.completions.create(
-            model="gpt-4o", # Using robust default model (gpt-5.2 is not standard)
+            model="gpt-4o", 
             temperature=0.2,
             max_tokens=250,
             messages=[
