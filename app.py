@@ -298,7 +298,7 @@ def calculate_recoupment(advance, revenue_stream, artist_share, final_week_rev):
 def generate_ai_strategy(api_key, context_data):
     """
     Generates a negotiation strategy using OpenAI API.
-    Uses RAW GROWTH metrics to differentiate between Stable, Viral, and Crashing artists.
+    Refined for "Ammo" (Data Leverage) instead of Concessions.
     """
     if not OPENAI_AVAILABLE:
         return "❌ Error: OpenAI library not installed."
@@ -312,37 +312,32 @@ def generate_ai_strategy(api_key, context_data):
         trend_label = context_data['trend']['us_label']
         
         system_prompt = """
-IMPORTANT: Do not wrap output in markdown code blocks (e.g. no ```html). Return raw text only.
-
-You are a ruthless but fair Deal Strategist for a Record Label. 
-Your goal is to write a strategic brief for the COO based on the data provided.
+You are a ruthless Deal Strategist for a Record Label. 
+Your goal is to write a private strategic brief for the COO.
 
 **INPUT DATA INTERPRETATION:**
-- **Raw Growth:** {us_growth}% / {global_growth}%. Note: For New Artists, this represents total growth since their first week of data. If this is high (+100%) but the Label says 'Cooling', it means they launched big but are now dropping.
-- **Trend Label:** "{trend_label}". If this says "Falling Knife" or "Cooling", the raw numbers might look high, but the recent weeks are crashing. TRUST THE LABEL for risk.
-- **Valuation:** We capped the valuation at a "Ceiling" of {ceiling}. 
-- **Leverage:** Artist Recoupment is {recoup} months. If >18 months, this is your main leverage (Trap).
+- **Raw Growth:** {us_growth}% (US) / {global_growth}% (Global).
+- **Trend Label:** "{trend_label}". If this says "Falling Knife" or "Cooling", the asset is distressed.
+- **Leverage:** Artist Recoupment is {recoup} months.
 
-**OUTPUT FORMAT (Strict HTML):**
-1. <b>The Read</b>: 1 sentence analyzing the specific growth profile (e.g., "Viral explosion with +300% growth" or "Stable earner with flat trends").
+**OUTPUT FORMAT (Strict HTML, No Markdown):**
+1. <b>The Read</b>: 1 sentence on the asset quality (e.g. "High-risk viral moment that is already fading").
 2. <b>The Playbook</b>:
-   - <b>Open</b>: Start at {anchor}.
-   - <b>Target</b>: Land at {target}.
-   - <b>Rationale</b>: Specific reason using the Raw Growth % vs the Trend Label. (e.g. "Despite +{us_growth}% growth, we are anchoring low because the 'Falling Knife' signal shows momentum is breaking.")
-   - <b>The Trap</b>: Use the {recoup} month recoupment time to pressure them.
-3. <b>COO Context</b>:
-   - <b>Risk/Reward</b>: "Breakeven in {breakeven} months." (Comment if this is safe/risky).
-   - <b>Verdict</b>: 1 sentence on if we should walk away or chase.
-4. <b>Trading Chips</b>:
-   - 2 specific concessions to offer if they reject the Advance.
+   - <b>Open</b>: {anchor}
+   - <b>Target</b>: {target}
+   - <b>Rationale</b>: Why this price? (e.g. "We are pricing for the 'Cooling' reality, not the viral peak.")
+3. <b>The Leverage</b>: Identify the artist's single biggest weakness. (Is it the dropping trend? The lack of US history? The 2+ year recoupment?). **Do not default to recoupment time unless it is extreme (>18mo).**
+4. <b>The Ammo</b>:
+   - List 2 hard data points to use in the room to defend our price. (e.g. "Your US streams dropped 15% since launch", "You have zero catalog history", "Global growth is masking US decay"). **DO NOT offer concessions.**
+5. <b>COO Context</b>:
+   - <b>Verdict</b>: "Breakeven in {breakeven} mo." (Safe/Risky?)
 """
 
-        # Format System Prompt with Data
+        # Format System Prompt
         system_prompt = system_prompt.format(
             us_growth=f"{us_growth_pct:+.0f}",
             global_growth=f"{global_growth_pct:+.0f}",
             trend_label=trend_label,
-            ceiling=f"${context_data['valuation']['ceiling']:,.0f}",
             anchor=f"${context_data['offer_matrix']['conservative']:,.0f}",
             target=f"${context_data['deal_reality_check']['selected_advance']:,.0f}",
             recoup=f"{context_data['deal_reality_check']['artist_recoup_months']:.1f}",
