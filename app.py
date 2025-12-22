@@ -312,25 +312,34 @@ def generate_ai_strategy(api_key, context_data):
         trend_label = context_data['trend']['us_label']
         
         system_prompt = """
-You are a ruthless Deal Strategist for a Record Label. 
-Your goal is to write a private strategic brief for the COO.
+You are a Senior Deal Strategist advising the COO. 
+Your output is an INTERNAL BRIEFING, not a script for the artist.
 
-**INPUT DATA INTERPRETATION:**
-- **Raw Growth:** {us_growth}% (US) / {global_growth}% (Global).
-- **Trend Label:** "{trend_label}". If this says "Falling Knife" or "Cooling", the asset is distressed.
-- **Leverage:** Artist Recoupment is {recoup} months.
+**1. RECOUPMENT GRADING SCALE (Label Breakeven):**
+- **< 9 Months:** INCREDIBLE. (Safe, No-Brainer).
+- **9 - 12 Months:** TARGET. (This is our goal).
+- **12 - 15 Months:** STRETCH. (Acceptable for viral hits).
+- **> 15 Months:** RISKY. (Requires high conviction).
 
-**OUTPUT FORMAT (Strict HTML, No Markdown):**
-1. <b>The Read</b>: 1 sentence on the asset quality (e.g. "High-risk viral moment that is already fading").
+**2. AMMO GENERATION RULES (Internal Data Points):**
+- **If "Cooling" or "Falling Knife":** Highlight the speed of the drop. (e.g. "US volume is down X% from peak.")
+- **If "Stable" but Low Growth:** Highlight the ceiling. (e.g. "Upside is capped; we are paying for stability, not a rocket ship.")
+- **If "New Artist":** Highlight the lack of catalog. (e.g. "Zero back catalog to cushion us if the single fails.")
+- **If Global > US:** Highlight the value gap. (e.g. "Global volume is high, but US ad rates are low. Revenue quality is poor.")
+
+**OUTPUT FORMAT (Strict HTML):**
+1. <b>The Read</b>: 1 blunt sentence on the asset quality.
 2. <b>The Playbook</b>:
    - <b>Open</b>: {anchor}
    - <b>Target</b>: {target}
-   - <b>Rationale</b>: Why this price? (e.g. "We are pricing for the 'Cooling' reality, not the viral peak.")
-3. <b>The Leverage</b>: Identify the artist's single biggest weakness. (Is it the dropping trend? The lack of US history? The 2+ year recoupment?). **Do not default to recoupment time unless it is extreme (>18mo).**
-4. <b>The Ammo</b>:
-   - List 2 hard data points to use in the room to defend our price. (e.g. "Your US streams dropped 15% since launch", "You have zero catalog history", "Global growth is masking US decay"). **DO NOT offer concessions.**
-5. <b>COO Context</b>:
-   - <b>Verdict</b>: "Breakeven in {breakeven} mo." (Safe/Risky?)
+   - <b>Rationale</b>: One sentence justifying the price.
+3. <b>The Leverage</b>: The single biggest structural weakness in the deal (e.g. "Recoupment time," "Declining trend," "Empty catalog").
+4. <b>The Ammo (Internal Stats)</b>:
+   - List 2-3 hard data points the COO can use in the room.
+   - *Example Style:* "Raw US growth is only +{us_growth}%, proving the viral moment is over."
+   - *Example Style:* "Global growth (+{global_growth}%) is masking the fact that US streams are flat."
+5. <b>COO Verdict</b>:
+   - "Breakeven in {breakeven} mo." (<b>GRADE THIS using the Scale above</b>).
 """
 
         # Format System Prompt
@@ -348,13 +357,13 @@ Your goal is to write a private strategic brief for the COO.
 **Analyze this specific case:**
 - **Raw US Growth:** {us_growth_pct:+.1f}%
 - **Raw Global Growth:** {global_growth_pct:+.1f}%
-- **Risk Label:** {trend_label}
-- **Selected Strategy:** {context_data['deal_reality_check']['strategy_name']}
+- **Trend Label:** {trend_label}
+- **Label Breakeven:** {context_data['deal_reality_check']['label_breakeven_months']:.1f} Months
 """
         
         response = client.chat.completions.create(
             model="gpt-4o", 
-            temperature=0.7,
+            temperature=0.6,
             messages=[
                 {"role": "system", "content": system_prompt},
                 {"role": "user", "content": user_prompt}
