@@ -308,19 +308,24 @@ def generate_ai_strategy(api_key, context_data):
         client = openai.OpenAI(api_key=api_key)
         
         system_prompt = """
-You are a Negotiation Coach for a record label.
-Your goal is to write a short, punchy script for a buyer to read aloud during a negotiation.
+You are a senior Deal Strategist advising a Record Label COO.
+Your goal is to provide a high-level strategic assessment and a ruthlessly effective negotiation script.
 
-GUIDELINES:
-- **Be Direct**: Write exactly what the buyer should say. No "The data suggests..." or "You could say...".
-- **Use Real Numbers**: I will provide formatted strings (e.g., $105,000). Use them exactly. Do not use variable names.
-- **Structure**: 
-  1. Anchor (The low offer)
-  2. Rationalize (The "Why" - using the trend data)
-  3. Close (The "Stretch" offer + the consequence of long recoupment)
-  4. If They Push (2 specific trade-offs, like Marketing or Rights)
+CRITICAL RULES:
+1. **Trend Labels are Buckets, not Stats**: If a trend label contains a percentage (e.g., "Falling Knife (-1.0%)"), that % is a safety cap, NOT the actual growth rate. NEVER say "the trend is -1.0%". Instead, describe the behavior (e.g., "Volume is crashing," "New artist hype is cooling off").
+2. **Provide Ammo, Not Just Data**: Don't just list the numbers. Explain *why* they give us leverage. (e.g., "Recoupment is 25 months; we are essentially financing their career with no near-term ROI").
+3. **No Fluff**: Be concise. No "I hope this helps."
 
-Tone: Professional, firm, realistic.
+STRUCTURE:
+1. **The Read**: One sentence summary of the asset's quality (e.g., "Distressed asset," "Stable earner").
+2. **The Script (Buyer to Artist)**:
+   - **Anchor**: State the low offer.
+   - **Rationalize**: Explain the valuation using the specific trend behavior (cooling/crashing) to justify the Floor price. Use "Risk-Adjusted" terminology.
+   - **Close**: Present the target advance and highlight the long recoupment timeline as a major concession from the label.
+3. **COO Context / Ammo (Internal Only)**:
+   - 2 bullet points giving the COO "back-pocket" ammo. Focus on risk/reward ratios, break-even timelines vs. contract length, or volatility.
+4. **If They Push**:
+   - 2 specific trading chips (e.g., Marketing spend, Term length).
 """
 
         # Pre-format numbers to ensure the AI sees "$150,000" not "150000" or "target_ceiling"
@@ -336,20 +341,17 @@ DATA FOR SCRIPT:
 - Floor Valuation: {fmt_floor}
 - Target/Selected Advance: {fmt_advance}
 - Recoupment Time at Target: {fmt_recoup} months
-- Market Trend: {trend_desc}
+- Market Trend Label: {trend_desc}
 
 INSTRUCTION:
-Write the 4-point script using ONLY these numbers.
-1. **ANCHOR**: State the Anchor Price.
-2. **RATIONALIZE**: Explain that the risk-adjusted floor is {fmt_floor} because of the {trend_desc} trend.
-3. **CLOSE**: State that if we stretch to {fmt_advance}, the artist won't see royalties for {fmt_recoup} months.
-4. **IF THEY PUSH**: Give 2 bullet points on what to trade (e.g. reduce marketing, extend term).
+Write the strategy following the STRUCTURE exactly.
+Use the Real Numbers provided. Do NOT output placeholder text.
 """
         
         response = client.chat.completions.create(
             model="gpt-4o", 
             temperature=0.2,
-            max_tokens=250,
+            max_tokens=300,
             messages=[
                 {"role": "system", "content": system_prompt},
                 {"role": "user", "content": user_prompt}
