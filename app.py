@@ -135,7 +135,9 @@ TREND_MAP = {
     "Stable (0%)": 1.0,
     "Moderate (0.5%)": 1.005,
     "Strong (1.0%)": 1.01,
-    "Decay (-1.0%)": 0.99
+    "Decay (-1.0%)": 0.99,
+    "Falling Knife (-1.0%)": 0.99,       # New Logic
+    "New Artist / Cooling (-1.0%)": 0.99 # New Logic
 }
 
 # -----------------------------------------------------------------------------
@@ -146,6 +148,7 @@ def parse_input_data(text_input):
     """
     Parses string input into list of integers.
     Handles '223,783' (formatted numbers) and '100, 200' (lists) intelligently.
+    Auto-pads with 0s if fewer than 8 data points are provided.
     """
     try:
         if not text_input.strip():
@@ -161,6 +164,11 @@ def parse_input_data(text_input):
         # 3. Split by whitespace and convert
         cleaned = [int(x.strip()) for x in text.split() if x.strip()]
         
+        # Auto-Padding Logic
+        if len(cleaned) < 8:
+            padding_needed = 8 - len(cleaned)
+            cleaned = [0] * padding_needed + cleaned
+        
         if len(cleaned) < 2:
             return None
         return cleaned
@@ -169,35 +177,50 @@ def parse_input_data(text_input):
 
 def analyze_trend(data_list):
     """
-    Calculates trend based on 8 weeks of data.
-    Logic: Compare Avg of first 4 vs Avg of last 4.
+    Calculates trend based on Hierarchy of Risk.
     Returns: Trend Name (Key), Raw % Change
     """
-    if len(data_list) < 2:
-        return "Stable (0%)", 0.0
+    # Ensure we have at least 8 points (should be handled by padding, but safe fallback)
+    if len(data_list) < 8:
+        # If somehow we still have less than 8, pad locally
+        data_list = [0] * (8 - len(data_list)) + data_list
+    
+    # We focus on the last 8 data points for the analysis window
+    analysis_window = data_list[-8:]
+    
+    # Setup
+    past_data = analysis_window[:4]    # First 4
+    recent_data = analysis_window[4:]  # Last 4
+    
+    avg_past = sum(past_data) / 4
+    avg_recent = sum(recent_data) / 4
+    
+    current_week = analysis_window[-1]
+    previous_week = analysis_window[-2]
 
-    # Split data (Handle cases with less than 8 points gracefully)
-    mid_point = len(data_list) // 2
-    past_data = data_list[:mid_point]
-    recent_data = data_list[mid_point:]
+    # Check 1: Falling Knife
+    # If recent average is positive, but current week crashed >20% below that average
+    if avg_recent > 0 and current_week < (avg_recent * 0.8):
+        return "Falling Knife (-1.0%)", -0.01
 
-    avg_past = sum(past_data) / len(past_data)
-    avg_recent = sum(recent_data) / len(recent_data)
+    # Check 2: New Artist Cooling
+    # If past volume was low (New Artist context) and momentum is breaking (current < prev)
+    if avg_past < 1000 and current_week < previous_week:
+        return "New Artist / Cooling (-1.0%)", -0.01
 
+    # Check 3: Standard Trend (Slope Analysis)
     if avg_past == 0:
-        pct_change = 0.0
+        slope = 0.0 # Prevent division by zero
     else:
-        pct_change = (avg_recent - avg_past) / avg_past
+        slope = (avg_recent - avg_past) / avg_past
 
-    # Logic Rules (The Stabilizer)
-    if pct_change < -0.002: # Less than -0.2%
-        trend_name = "Decay (-1.0%)"
-    elif -0.002 <= pct_change <= 0.002: # Between -0.2% and +0.2%
-        trend_name = "Stable (0%)"
-    else: # Greater than +0.2%
-        trend_name = "Moderate (0.5%)" # HARD CAP applied here
-
-    return trend_name, pct_change
+    if slope < -0.002:
+        return "Decay (-1.0%)", slope
+    elif -0.002 <= slope <= 0.002:
+        return "Stable (0%)", slope
+    else:
+        # Moderate Growth (Capped)
+        return "Moderate (0.5%)", 0.005
 
 def project_revenue(start_us_vol, start_ex_us_vol, us_mult, ex_us_mult, weeks=52):
     """Projects revenue for 'weeks' duration."""
@@ -422,6 +445,13 @@ if input_mode == "Advanced (Auto-Detect)":
     })
     st.line_chart(chart_data)
     
+    # NEW LOGIC: CRASH DETECTION ALERTS
+    if "Falling Knife" in us_trend_sel or "Falling Knife" in ex_us_trend_sel:
+        st.error("⚠️ CRASH DETECTED: 'Falling Knife' pattern found. Recent volume has dropped significantly (>20%) below average. Proceed with extreme caution.")
+
+    if "New Artist" in us_trend_sel or "New Artist" in ex_us_trend_sel:
+        st.warning("⚠️ VOLATILITY WARNING: New Artist / Cooling pattern detected. Early growth spurts are retracing. Projections are capped.")
+
     # Show Insights
     i1, i2 = st.columns(2)
     with i1:
