@@ -346,7 +346,48 @@ Make sure POSTURE aligns to deal_reality_check.selected_option (i.e., talk about
                 {"role": "user", "content": user_prompt}
             ]
         )
-        return response.choices[0].message.content
+
+        # Robust text extraction across SDK/model variants
+        text = None
+        try:
+            choice0 = response.choices[0]
+            msg = getattr(choice0, "message", None)
+            content = getattr(msg, "content", None) if msg else None
+
+            if isinstance(content, str):
+                text = content
+            elif isinstance(content, list):
+                parts = []
+                for p in content:
+                    if isinstance(p, str):
+                        parts.append(p)
+                    elif isinstance(p, dict):
+                        if isinstance(p.get("text"), str):
+                            parts.append(p["text"])
+                        elif p.get("type") == "text" and isinstance(p.get("text"), str):
+                            parts.append(p["text"])
+                        elif isinstance(p.get("content"), str):
+                            parts.append(p["content"])
+                    else:
+                        t = getattr(p, "text", None)
+                        if isinstance(t, str):
+                            parts.append(t)
+                text = "
+".join([x for x in parts if x])
+        except Exception:
+            text = None
+
+        # Some SDK/model combos expose output_text
+        if (not text) and hasattr(response, "output_text"):
+            try:
+                text = response.output_text
+            except Exception:
+                pass
+
+        if not text or not str(text).strip():
+            return "⚠️ AI returned an empty response. Try again (or loosen constraints / increase max tokens)."
+
+        return str(text).strip()
 
     except AttributeError:
         return "⚠️ Error: It looks like you have an older version of the OpenAI library installed. Please run `pip install --upgrade openai` in your terminal."
@@ -692,17 +733,23 @@ if openai_api_key:
                 }
             }
             ai_output = generate_ai_strategy(openai_api_key, context_data)
-            
-            # Display AI Output
-            st.markdown(f"""
-            <div class="strategy-box" style="border-left: 5px solid #7c4dff;">
-                <strong>🤖 AI EXECUTIVE ADVISOR:</strong><br><br>
-                {ai_output.replace(chr(10), '<br>')}
-            </div>
-            """, unsafe_allow_html=True)
-            
-            with st.expander("View Raw Output"):
-                st.write(ai_output)
+
+            # Display AI Output (with guardrails)
+            if not ai_output or not str(ai_output).strip():
+                st.error("⚠️ AI returned empty text. Falling back to the standard script. Open Debug below to see what was sent.")
+                st.markdown(strategy_html, unsafe_allow_html=True)
+                with st.expander("Debug: INPUT_JSON sent to model"):
+                    st.json(context_data)
+            else:
+                st.markdown(f"""
+                <div class=\"strategy-box\" style=\"border-left: 5px solid #7c4dff;\">
+                    <strong>🤖 AI EXECUTIVE ADVISOR:</strong><br><br>
+                    {(str(ai_output)).replace(chr(10), '<br>')}
+                </div>
+                """, unsafe_allow_html=True)
+
+                with st.expander("View Raw Output"):
+                    st.write(ai_output)
                 
     except Exception as e:
         st.error(f"AI Error: {str(e)}")
