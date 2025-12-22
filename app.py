@@ -293,77 +293,71 @@ def calculate_recoupment(advance, revenue_stream, artist_share, final_week_rev):
     return label_months, artist_months
 
 # -----------------------------------------------------------------------------
-# AI GENERATOR FUNCTION
+# AI GENERATOR FUNCTION (UPDATED)
 # -----------------------------------------------------------------------------
 def generate_ai_strategy(api_key, context_data):
     """
     Generates a negotiation strategy using OpenAI API.
-    Handles library version errors gracefully.
+    Uses RAW GROWTH metrics to differentiate between Stable, Viral, and Crashing artists.
     """
     if not OPENAI_AVAILABLE:
-        return "❌ Error: OpenAI library not installed. Please run `pip install openai` in your terminal."
+        return "❌ Error: OpenAI library not installed."
 
     try:
-        # Attempt to use the v1.0+ client syntax
         client = openai.OpenAI(api_key=api_key)
         
+        # Extract raw data for the prompt
+        us_growth_pct = context_data['raw_metrics']['us_growth_pct'] * 100
+        global_growth_pct = context_data['raw_metrics']['global_growth_pct'] * 100
+        trend_label = context_data['trend']['us_label']
+        
         system_prompt = """
-You are an internal Deal Strategist advising the COO of a record label.
-Your output is a private strategic brief for the COO, NOT a script for the artist.
+You are a ruthless but fair Deal Strategist for a Record Label. 
+Your goal is to write a strategic brief for the COO based on the data provided.
 
-**TONE & STYLE:**
-- **Internal & Ruthless:** Speak colleague-to-colleague. Be direct about risk and leverage.
-- **Bold Key Terms:** Use HTML <b>tags</b> for emphasis (e.g., <b>Anchor</b>), NOT markdown stars.
-- **No Fluff:** Do not summarize the deal unless adding insight.
+**INPUT DATA INTERPRETATION:**
+- **Raw Growth:** {us_growth}% (US) / {global_growth}% (Global). Use this to determine if the artist is Viral, Stable, or decaying.
+- **Trend Label:** "{trend_label}". If this says "Falling Knife" or "Cooling", the raw numbers might look high, but the recent weeks are crashing. TRUST THE LABEL for risk.
+- **Valuation:** We capped the valuation at a "Ceiling" of {ceiling}. 
+- **Leverage:** Artist Recoupment is {recoup} months. If >18 months, this is your main leverage (Trap).
 
-**FINANCIAL LOGIC (CRITICAL):**
-- **Label Breakeven** ({breakeven} mo): This is when WE (the label) recover our cash. Short is good (<12mo). Long is risk.
-- **Artist Recoupment** ({recoup} mo): This is when the ARTIST starts earning royalties. A long recoupment is NOT a financial risk to us (we are already profitable), but it is a **Negotiation Lever**. We use it to say: "You won't see a check for 2 years at this price."
-- **Trend Labels**: If a trend says "Cooling (-1.0%)", the % is a safety cap. Do not quote it as a statistic. Say "Momentum is breaking."
-
-**OUTPUT STRUCTURE:**
-1. <b>The Read</b>: 1 sentence on the asset quality/risk profile.
+**OUTPUT FORMAT (Strict HTML):**
+1. <b>The Read</b>: 1 sentence analyzing the specific growth profile (e.g., "Viral explosion with +300% growth" or "Stable earner with flat trends").
 2. <b>The Playbook</b>:
-   - <b>Open</b>: Start negotiation at {anchor}.
-   - <b>Target</b>: Land the deal at {target} (our modeled reality).
-   - <b>Rationale</b>: Why {target} is the correct price based on the trend behavior (e.g. falling knife vs stable).
-   - <b>The Trap</b>: Use the {recoup} month Artist Recoupment timeline to talk them down. (e.g. "At {target}, they are locked out of royalties for X months.")
+   - <b>Open</b>: Start at {anchor}.
+   - <b>Target</b>: Land at {target}.
+   - <b>Rationale</b>: Specific reason using the Raw Growth % vs the Trend Label. (e.g. "Despite +{us_growth}% growth, we are anchoring low because the 'Falling Knife' signal shows momentum is breaking.")
+   - <b>The Trap</b>: Use the {recoup} month recoupment time to pressure them.
 3. <b>COO Context</b>:
-   - 2 bullets on internal risk/reward. (e.g. "We break even in {breakeven} months, which is excellent/risky.")
+   - <b>Risk/Reward</b>: "Breakeven in {breakeven} months." (Comment if this is safe/risky).
+   - <b>Verdict</b>: 1 sentence on if we should walk away or chase.
 4. <b>Trading Chips</b>:
-   - 2 things to give/take if they push on the Advance.
+   - 2 specific concessions to offer if they reject the Advance.
 """
 
-        # Pre-format numbers
-        fmt_anchor = f"${context_data['offer_matrix']['conservative']:,.0f}"
-        fmt_target = f"${context_data['deal_reality_check']['selected_advance']:,.0f}" # The user's selection
-        fmt_recoup = f"{context_data['deal_reality_check']['artist_recoup_months']:.1f}"
-        fmt_breakeven = f"{context_data['deal_reality_check']['label_breakeven_months']:.1f}"
-        trend_desc = f"{context_data['trend']['us_label']}"
-
-        # Inject dynamic values into system prompt slots
+        # Format System Prompt with Data
         system_prompt = system_prompt.format(
-            anchor=fmt_anchor,
-            target=fmt_target,
-            recoup=fmt_recoup,
-            breakeven=fmt_breakeven
+            us_growth=f"{us_growth_pct:+.0f}",
+            global_growth=f"{global_growth_pct:+.0f}",
+            trend_label=trend_label,
+            ceiling=f"${context_data['valuation']['ceiling']:,.0f}",
+            anchor=f"${context_data['offer_matrix']['conservative']:,.0f}",
+            target=f"${context_data['deal_reality_check']['selected_advance']:,.0f}",
+            recoup=f"{context_data['deal_reality_check']['artist_recoup_months']:.1f}",
+            breakeven=f"{context_data['deal_reality_check']['label_breakeven_months']:.1f}"
         )
 
         user_prompt = f"""
-**DEAL CONTEXT:**
+**Analyze this specific case:**
+- **Raw US Growth:** {us_growth_pct:+.1f}%
+- **Raw Global Growth:** {global_growth_pct:+.1f}%
+- **Risk Label:** {trend_label}
 - **Selected Strategy:** {context_data['deal_reality_check']['strategy_name']}
-- **Market Trend:** {trend_desc}
-- **Label Breakeven:** {fmt_breakeven} months
-- **Artist Recoupment:** {fmt_recoup} months
-
-**TASK:**
-Write the 4-section Strategic Brief. Use the exact numbers provided.
 """
         
         response = client.chat.completions.create(
             model="gpt-4o", 
-            temperature=0.2,
-            max_tokens=350,
+            temperature=0.7,
             messages=[
                 {"role": "system", "content": system_prompt},
                 {"role": "user", "content": user_prompt}
@@ -371,8 +365,6 @@ Write the 4-section Strategic Brief. Use the exact numbers provided.
         )
         return response.choices[0].message.content
 
-    except AttributeError:
-        return "⚠️ Error: It looks like you have an older version of the OpenAI library installed. Please run `pip install --upgrade openai` in your terminal."
     except Exception as e:
         return f"Error connecting to OpenAI: {str(e)}"
 
@@ -663,11 +655,11 @@ with c3:
     st.metric("Label Profit @ Recoup", f"${label_profit_at_recoup:,.0f}", help="Net profit when artist recoups")
 
 # -----------------------------------------------------------------------------
-# SECTION 4: BUYER'S STRATEGY
+# SECTION 4: BUYER'S STRATEGY (UPDATED LOGIC)
 # -----------------------------------------------------------------------------
 st.markdown("#### 4. Buyer's Strategy Script")
 
-# Default Static HTML (Preserved for fallback)
+# Default Static HTML
 strategy_html = f"""
 <div class="strategy-box">
     <strong>NEGOTIATION SCRIPT:</strong><br><br>
@@ -679,17 +671,24 @@ strategy_html = f"""
 """
 
 if openai_api_key:
+    # Helper to calc raw slope for AI context
+    def get_raw_slope(data):
+        if len(data) < 8: return 0.0
+        past = sum(data[:4])/4
+        recent = sum(data[4:])/4
+        if past == 0: return 0.0
+        return (recent - past) / past
+
     try:
-        with st.spinner("✨ Generating AI Strategy..."):
-            # UPDATED: Full Context Data for AI
+        with st.spinner("✨ Analyzing Deal Data with AI Consultant..."):
+            # Calculate Raw Growth for AI Context
+            us_raw = get_raw_slope(us_history)
+            global_raw = get_raw_slope(global_history)
+
             context_data = {
-                "meta": {
-                    "input_mode": input_mode,
-                    "history_points": {
-                        "us": len([x for x in us_history if x != 0]),
-                        "global": len([x for x in global_history if x != 0]),
-                    },
-                    "trend_note": "Trend labels are risk buckets; any % shown may be a safety cap and not a measured slope."
+                "raw_metrics": {
+                    "us_growth_pct": us_raw,
+                    "global_growth_pct": global_raw
                 },
                 "trend": {
                     "us_label": us_trend_sel,
@@ -701,24 +700,17 @@ if openai_api_key:
                 },
                 "offer_matrix": {
                     "conservative": float(conservative_offer),
-                    "target_floor": float(floor_gross),
-                    "target_ceiling": float(ceil_gross),
-                    "aggressive": float(aggressive_offer),
                 },
                 "deal_reality_check": {
-                    "selected_option": selected_option,       # e.g. "Aggressive (110% of Ceiling)"
-                    "strategy_name": strategy_name,           # e.g. "Aggressive"
+                    "strategy_name": strategy_name,
                     "selected_advance": float(selected_advance),
                     "label_breakeven_months": float(lbl_recoup_mo),
                     "artist_recoup_months": float(art_recoup_mo),
-                    "label_profit_at_recoup": float(label_profit_at_recoup),
-                    "artist_share_pct": float(artist_share_pct),
                 }
             }
             
             ai_output = generate_ai_strategy(openai_api_key, context_data)
             
-            # Display AI Output
             st.markdown(f"""
             <div class="strategy-box" style="border-left: 5px solid #7c4dff;">
                 <strong>🤖 AI EXECUTIVE ADVISOR:</strong><br><br>
@@ -726,12 +718,8 @@ if openai_api_key:
             </div>
             """, unsafe_allow_html=True)
             
-            with st.expander("View Raw Output"):
-                st.write(ai_output)
-                
     except Exception as e:
         st.error(f"AI Error: {str(e)}")
-        st.caption("Falling back to standard script...")
         st.markdown(strategy_html, unsafe_allow_html=True)
 else:
     # Fallback to existing static script
