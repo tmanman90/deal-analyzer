@@ -306,14 +306,23 @@ def generate_ai_strategy(api_key, context_data):
     try:
         client = openai.OpenAI(api_key=api_key)
         
-        # Extract raw data for the prompt
-        us_growth_pct = context_data['raw_metrics']['us_growth_pct'] * 100
-        global_growth_pct = context_data['raw_metrics']['global_growth_pct'] * 100
-        trend_label = context_data['trend']['us_label']
+        # 1. Clean the Trend Label to remove misleading hard-caps (e.g. "Cooling (-1.0%)" -> "Cooling")
+        # This prevents the AI from quoting the safety cap as the actual decline rate.
+        raw_label = context_data['trend']['us_label']
+        clean_label = raw_label.split('(')[0].strip() if '(' in raw_label else raw_label
+
+        # 2. Extract Narrative Metrics for Prompt Injection
+        us_wow = context_data['narrative_metrics']['us_wow']
+        us_drop = context_data['narrative_metrics']['us_drop']
         
         system_prompt = """
 You are a Senior Deal Strategist advising the COO. 
 Your output is a PRIVATE INTERNAL BRIEFING. 
+
+**CRITICAL DATA RULES (Don't get confused):**
+- **The Trend Label is "{clean_label}".** If the raw data shows a different story (e.g. a huge crash), trust the RAW DATA numbers below.
+- **Ignore Model Caps:** Do not quote any "1.0%" or "-1.0%" caps associated with the category label. Use the **Real Velocity** stats below.
+- **Real Velocity:** US Week-over-Week change is **{us_wow}%**. Drop from peak is **{us_drop}%**. USE THESE NUMBERS.
 
 **NARRATIVE RULES (Tell the Story):**
 - **Don't just list numbers.** Give context.
@@ -333,7 +342,7 @@ Your output is a PRIVATE INTERNAL BRIEFING.
 3. <b>The Playbook</b>:
    - <b>Open</b>: ${conservative}
    - <b>Target</b>: ${target} ({strategy})
-   - <b>Rationale</b>: (Why this price?).
+   - <b>Rationale</b>: (Why this price? Cite the actual {us_wow}% drop if relevant).
 4. <b>The Leverage</b>: Identify the weakness (e.g. "Broken momentum," "Empty catalog").
 5. <b>The Ammo (Internal Only)</b>:
    - (Stat 1: US Narrative - e.g. "Down {us_drop}% from peak just {us_weeks_ago} weeks ago").
@@ -347,6 +356,7 @@ Your output is a PRIVATE INTERNAL BRIEFING.
 
         # Format System Prompt with Narrative Data
         system_prompt = system_prompt.format(
+            clean_label=clean_label, # Inject cleaned label
             strategy=context_data['deal_reality_check']['strategy_name'],
             us_curr=context_data['narrative_metrics']['us_curr'],
             us_peak=context_data['narrative_metrics']['us_peak'],
@@ -368,15 +378,15 @@ Your output is a PRIVATE INTERNAL BRIEFING.
         user_prompt = f"""
 **Case Data:**
 - Selected Strategy: {context_data['deal_reality_check']['strategy_name']}
-- US Trend: {trend_label} (Peak {context_data['narrative_metrics']['us_weeks_ago']} wks ago)
-- Global Trend: {context_data['trend']['intl_label']} (Peak {context_data['narrative_metrics']['gl_weeks_ago']} wks ago)
+- US Trend Category: {clean_label} (Peak {context_data['narrative_metrics']['us_weeks_ago']} wks ago)
 - US WoW Change: {context_data['narrative_metrics']['us_wow']}%
+- US Drop from Peak: {context_data['narrative_metrics']['us_drop']}%
 """
         
         response = client.chat.completions.create(
             model="gpt-5.2", 
             temperature=0.6,
-            max_completion_tokens=1000, # Increased to prevent cutoff and fixed parameter name
+            max_completion_tokens=1000, 
             messages=[
                 {"role": "system", "content": system_prompt},
                 {"role": "user", "content": user_prompt}
