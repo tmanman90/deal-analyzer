@@ -4,6 +4,8 @@ import numpy as np
 import math
 import base64
 import json
+import gspread
+from google.oauth2.service_account import Credentials
 
 # Safe Import for OpenAI to prevent app crash if missing/old
 try:
@@ -819,3 +821,69 @@ if openai_api_key:
 else:
     # Fallback to existing static script
     st.markdown(strategy_html, unsafe_allow_html=True)
+
+# -----------------------------------------------------------------------------
+# PHASE 2: SAVE DEAL SNAPSHOT
+# -----------------------------------------------------------------------------
+with st.sidebar:
+    st.markdown("---")
+    st.header("📌 Save Deal Snapshot")
+    
+    with st.form("save_deal_form"):
+        deal_id = st.text_input("Deal ID", help="Unique identifier for this deal")
+        artist_name = st.text_input("Artist / Project")
+        date_signed = st.date_input("Date Signed")
+        forecast_start = st.date_input("Forecast Start Date")
+        executed_advance = st.number_input("Executed Advance ($)", min_value=0.0, step=1000.0)
+        
+        submitted = st.form_submit_button("Save Snapshot to Tracker")
+        
+        if submitted:
+            # 1. Validation
+            if not deal_id or not artist_name:
+                st.error("Deal ID and Artist/Project are required.")
+            else:
+                try:
+                    # 2. Setup GSheets Auth
+                    scope = ['https://www.googleapis.com/auth/spreadsheets', 'https://www.googleapis.com/auth/drive']
+                    # Load secrets
+                    if "gcp_service_account" not in st.secrets or "deal_tracker_sheet_id" not in st.secrets:
+                        st.error("Missing Google Sheets secrets.")
+                    else:
+                        creds_dict = dict(st.secrets["gcp_service_account"])
+                        creds = Credentials.from_service_account_info(creds_dict, scopes=scope)
+                        client = gspread.authorize(creds)
+                        
+                        # 3. Open Sheet
+                        sheet = client.open_by_key(st.secrets["deal_tracker_sheet_id"])
+                        try:
+                            worksheet = sheet.worksheet("DEALS")
+                        except gspread.WorksheetNotFound:
+                            st.error("Worksheet 'DEALS' not found.")
+                            worksheet = None
+
+                        if worksheet:
+                            # 4. Check Duplicates
+                            existing_ids = worksheet.col_values(1) # Column A
+                            if str(deal_id) in existing_ids:
+                                st.error(f"Deal ID '{deal_id}' already exists.")
+                            else:
+                                # 5. Prepare Row
+                                # Data: Deal ID, Artist, Signed, Start, Exec Adv, Floor, Ceiling, Strategy, Sel Adv, Breakeven
+                                row_data = [
+                                    str(deal_id),
+                                    str(artist_name),
+                                    str(date_signed),
+                                    str(forecast_start),
+                                    float(executed_advance),
+                                    float(floor_gross),
+                                    float(ceil_gross),
+                                    str(selected_option),
+                                    float(selected_advance),
+                                    round(float(lbl_recoup_mo), 1)
+                                ]
+                                
+                                worksheet.append_row(row_data)
+                                st.success("Snapshot saved to DEALS tracker!")
+                except Exception as e:
+                    st.error(f"Error saving to tracker: {str(e)}")
