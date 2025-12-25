@@ -421,6 +421,8 @@ with st.sidebar:
     global_streams = 0
     us_trend_sel = "Stable (0%)"
     ex_us_trend_sel = "Stable (0%)"
+    us_trend_detected = "Stable (0%)" # Ensure variable exists for display scope
+    ex_us_trend_detected = "Stable (0%)" # Ensure variable exists for display scope
     us_history = []
     global_history = []
     
@@ -458,6 +460,7 @@ with st.sidebar:
         # When clicked, set the state to True
         if st.button("Run Analysis", type="primary"):
             st.session_state.analysis_complete = True
+            st.session_state.force_reset_trends = True # NEW: Signal to reset overrides to detection
             
         # Use session state to determine if we run, not just the button return value
         if st.session_state.analysis_complete:
@@ -470,13 +473,29 @@ with st.sidebar:
                 global_streams = global_history[-1]
                 
                 # 2. Auto-Detect Trends
-                us_trend_sel, us_pct = analyze_trend(us_history)
+                us_trend_detected, us_pct = analyze_trend(us_history)
                 ex_us_history = [g - u for g, u in zip(global_history, us_history)] 
                 
                 # Safety check for Ex-US negatives
                 ex_us_history = [max(0, x) for x in ex_us_history]
                 
-                ex_us_trend_sel, ex_us_pct = analyze_trend(ex_us_history)
+                ex_us_trend_detected, ex_us_pct = analyze_trend(ex_us_history)
+                
+                # --- OVERRIDE LOGIC ---
+                # If "Run Analysis" was just clicked, force reset the overrides to the new detection
+                if st.session_state.get('force_reset_trends', False):
+                    st.session_state.us_trend_override = us_trend_detected
+                    st.session_state.ex_us_trend_override = ex_us_trend_detected
+                    st.session_state.force_reset_trends = False # Reset flag so manual changes stick next time
+                
+                # If overrides don't exist yet (e.g. first run), set them
+                elif 'us_trend_override' not in st.session_state:
+                    st.session_state.us_trend_override = us_trend_detected
+                    st.session_state.ex_us_trend_override = ex_us_trend_detected
+                
+                # Set the ACTIVE trend selection to the OVERRIDE value (which might be the same as detection)
+                us_trend_sel = st.session_state.us_trend_override
+                ex_us_trend_sel = st.session_state.ex_us_trend_override
                 
                 run_analysis = True
             else:
@@ -537,7 +556,7 @@ with st.sidebar:
         st.caption("Raw Code (if needed):")
         st.code(share_url, language="text")
 
-    st.caption("Deal Analyzer v2.3 | AI Powered")
+    st.caption("Deal Analyzer v2.4 | AI Powered")
 
 # -----------------------------------------------------------------------------
 # MAIN APP LOGIC
@@ -566,7 +585,8 @@ if input_mode == "Advanced (Auto-Detect)":
     })
     st.line_chart(chart_data)
     
-    # NEW LOGIC: CRASH DETECTION ALERTS
+    # NEW LOGIC: CRASH DETECTION ALERTS (Based on Active/Selected Trend)
+    # Alerts logic now uses the active selection (us_trend_sel) to reflect overrides
     if "Falling Knife" in us_trend_sel or "Falling Knife" in ex_us_trend_sel:
         st.error("⚠️ CRASH DETECTED: 'Falling Knife' pattern found. Recent volume has dropped significantly (>20%) below average. Proceed with extreme caution.")
 
@@ -578,17 +598,29 @@ if input_mode == "Advanced (Auto-Detect)":
     with i1:
         st.markdown(f"""
         <div class="insight-box">
-            <strong>US Detected Trend:</strong><br>
+            <strong>US Active Trend:</strong><br>
             <span style="font-size: 1.2em; color: #00ffbf">{us_trend_sel}</span>
         </div>
         """, unsafe_allow_html=True)
     with i2:
         st.markdown(f"""
         <div class="insight-box">
-            <strong>Int'l Detected Trend:</strong><br>
+            <strong>Int'l Active Trend:</strong><br>
             <span style="font-size: 1.2em; color: #00ffbf">{ex_us_trend_sel}</span>
         </div>
         """, unsafe_allow_html=True)
+
+    # NEW: Audit / Override Section
+    with st.expander("⚙️ Audit / Override Trend Settings", expanded=False):
+        st.caption("The model auto-detected the trends below. You can manually override them here if you disagree.")
+        
+        st.markdown(f"**Model Detection:** US=`{us_trend_detected}` | Int'l=`{ex_us_trend_detected}`")
+        
+        ao1, ao2 = st.columns(2)
+        with ao1:
+            st.selectbox("Override US Trend", options=list(TREND_MAP.keys()), key="us_trend_override")
+        with ao2:
+            st.selectbox("Override Int'l Trend", options=list(TREND_MAP.keys()), key="ex_us_trend_override")
 
 
 # -----------------------------------------------------------------------------
