@@ -184,7 +184,9 @@ def parse_input_data(text_input):
     except ValueError:
         return None
 
-def analyze_trend(data_list):
+# --- CLASSIC MODEL FUNCTIONS ---
+
+def analyze_trend_classic(data_list):
     """
     Calculates trend based on Hierarchy of Risk.
     Returns: Trend Name (Key), Raw % Change
@@ -231,7 +233,7 @@ def analyze_trend(data_list):
         # Moderate Growth (Capped)
         return "Moderate (0.5%)", 0.005
 
-def project_revenue(start_us_vol, start_ex_us_vol, us_mult, ex_us_mult, weeks=52):
+def project_revenue_classic(start_us_vol, start_ex_us_vol, us_mult, ex_us_mult, weeks=52):
     """Projects revenue for 'weeks' duration."""
     total_rev = 0
     weekly_revs = []
@@ -242,6 +244,69 @@ def project_revenue(start_us_vol, start_ex_us_vol, us_mult, ex_us_mult, weeks=52
     for _ in range(weeks):
         current_us *= us_mult
         current_ex_us *= ex_us_mult
+        rev = (current_us * US_RATE) + (current_ex_us * EX_US_RATE)
+        total_rev += rev
+        weekly_revs.append(rev)
+        
+    return total_rev, weekly_revs[-1], weekly_revs
+
+# --- BETA MODEL FUNCTIONS (DYNAMIC MOMENTUM) ---
+
+def analyze_trend_beta(data_list):
+    if len(data_list) < 8:
+        data_list = [0] * (8 - len(data_list)) + data_list
+    analysis_window = data_list[-8:]
+    past_data = analysis_window[:4]
+    recent_data = analysis_window[4:]
+    avg_past = sum(past_data) / 4
+    avg_recent = sum(recent_data) / 4
+    
+    if avg_past == 0:
+        slope = 0.0
+    else:
+        slope = ((avg_recent - avg_past) / avg_past) / 4
+
+    # Safety Clamp: Cap viral growth at +5%
+    if slope > 0.05: slope = 0.05
+    
+    # Status Label
+    status = "Stable"
+    if slope < -0.005: status = "Decay"
+    if slope < -0.05:  status = "High Decay"
+    if slope > 0.005:  status = "Growth"
+    if slope > 0.025:  status = "High Growth"
+    
+    return {"status": status, "slope": slope, "avg_vol": avg_recent}
+
+def project_revenue_beta(start_us_vol, start_ex_us_vol, trend_data, weeks=52):
+    # Rates
+    US_RATE = 0.00356
+    EX_US_RATE = 0.00202
+    
+    total_rev = 0
+    weekly_revs = []
+    current_us = start_us_vol
+    current_ex_us = start_ex_us_vol
+    
+    initial_rate = trend_data['slope']
+    terminal_rate = -0.001 
+    
+    # Stabilization: Growth slows in 12 weeks, Decay in 26 weeks
+    if initial_rate > 0:
+        stabilization_weeks = 12.0
+    else:
+        stabilization_weeks = 26.0
+    
+    for i in range(weeks):
+        if i < stabilization_weeks:
+            progress = i / stabilization_weeks
+            current_rate = initial_rate * (1 - progress) + terminal_rate * progress
+        else:
+            current_rate = terminal_rate
+            
+        current_us *= (1 + current_rate)
+        current_ex_us *= (1 + current_rate)
+        
         rev = (current_us * US_RATE) + (current_ex_us * EX_US_RATE)
         total_rev += rev
         weekly_revs.append(rev)
@@ -414,6 +479,9 @@ with st.sidebar:
     
     input_mode = st.radio("Analysis Mode", mode_options, index=mode_index)
     
+    # --- MODEL SELECTION TOGGLE ---
+    use_beta = st.toggle("Use Beta Model (Dynamic)", value=True)
+    
     st.markdown("---")
     
     # Initialize variables to ensure scope
@@ -472,14 +540,14 @@ with st.sidebar:
                 us_streams = us_history[-1]
                 global_streams = global_history[-1]
                 
-                # 2. Auto-Detect Trends
-                us_trend_detected, us_pct = analyze_trend(us_history)
+                # 2. Auto-Detect Trends (Using Classic Logic for Dropdowns)
+                us_trend_detected, us_pct = analyze_trend_classic(us_history)
                 ex_us_history = [g - u for g, u in zip(global_history, us_history)] 
                 
                 # Safety check for Ex-US negatives
                 ex_us_history = [max(0, x) for x in ex_us_history]
                 
-                ex_us_trend_detected, ex_us_pct = analyze_trend(ex_us_history)
+                ex_us_trend_detected, ex_us_pct = analyze_trend_classic(ex_us_history)
                 
                 # --- OVERRIDE LOGIC ---
                 # If "Run Analysis" was just clicked, force reset the overrides to the new detection
@@ -628,16 +696,44 @@ if input_mode == "Advanced (Auto-Detect)":
 # -----------------------------------------------------------------------------
 st.markdown("### Valuation & Recoupment Model")
 
-# 1. Determine Multipliers
-us_mult_floor = get_scenario_multipliers(us_trend_sel, is_ceiling=False)
-ex_us_mult_floor = get_scenario_multipliers(ex_us_trend_sel, is_ceiling=False)
+if use_beta:
+    # --- BETA MODEL (Dynamic Momentum) ---
+    st.caption(f"Status: **Beta Model Active** (Slope-based Dynamic Projection)")
+    
+    # Analyze Trend (Beta)
+    # We use the US history as the driver for the slope in this Beta implementation
+    # If no history (Manual mode), this defaults to flat/stable
+    us_trend_data = analyze_trend_beta(us_history)
+    
+    # Project Revenue (Beta)
+    # Beta model generates a single dynamic trajectory
+    beta_gross, beta_last_wk, beta_stream = project_revenue_beta(us_streams, ex_us_streams, us_trend_data)
+    
+    # Map Beta results to Floor/Ceiling variables to maintain downstream compatibility
+    # The Beta model currently provides one "Most Likely" scenario
+    floor_gross = beta_gross
+    ceil_gross = beta_gross
+    
+    floor_last_wk = beta_last_wk
+    ceil_last_wk = beta_last_wk
+    
+    floor_stream = beta_stream
+    ceil_stream = beta_stream
+    
+    st.info(f"Beta Logic: Slope {us_trend_data['slope']:.4f} | Status: {us_trend_data['status']}")
 
-us_mult_ceil = get_scenario_multipliers(us_trend_sel, is_ceiling=True)
-ex_us_mult_ceil = get_scenario_multipliers(ex_us_trend_sel, is_ceiling=True)
+else:
+    # --- CLASSIC MODEL (Multiplier Map) ---
+    # 1. Determine Multipliers
+    us_mult_floor = get_scenario_multipliers(us_trend_sel, is_ceiling=False)
+    ex_us_mult_floor = get_scenario_multipliers(ex_us_trend_sel, is_ceiling=False)
 
-# 2. Run Projections
-floor_gross, floor_last_wk, floor_stream = project_revenue(us_streams, ex_us_streams, us_mult_floor, ex_us_mult_floor)
-ceil_gross, ceil_last_wk, ceil_stream = project_revenue(us_streams, ex_us_streams, us_mult_ceil, ex_us_mult_ceil)
+    us_mult_ceil = get_scenario_multipliers(us_trend_sel, is_ceiling=True)
+    ex_us_mult_ceil = get_scenario_multipliers(ex_us_trend_sel, is_ceiling=True)
+
+    # 2. Run Projections
+    floor_gross, floor_last_wk, floor_stream = project_revenue_classic(us_streams, ex_us_streams, us_mult_floor, ex_us_mult_floor)
+    ceil_gross, ceil_last_wk, ceil_stream = project_revenue_classic(us_streams, ex_us_streams, us_mult_ceil, ex_us_mult_ceil)
 
 # -----------------------------------------------------------------------------
 # SECTION 1: VALUATION RANGE
