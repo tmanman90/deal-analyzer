@@ -480,7 +480,7 @@ with st.sidebar:
     input_mode = st.radio("Analysis Mode", mode_options, index=mode_index)
     
     # --- MODEL SELECTION TOGGLE ---
-    use_beta = st.toggle("Use Beta Model (Dynamic)", value=True)
+    use_beta = st.toggle("Use Beta Model (Dynamic)", value=False)
     
     st.markdown("---")
     
